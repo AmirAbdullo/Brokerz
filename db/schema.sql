@@ -144,3 +144,13 @@ CREATE TABLE IF NOT EXISTS message_attachments (
 CREATE INDEX IF NOT EXISTS idx_message_attachments_message_id
   ON message_attachments(message_id);
 
+-- Buyer saved (favourited) cars
+CREATE TABLE IF NOT EXISTS saved_cars (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  buyer_id INTEGER NOT NULL,
+  vehicle_id INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(buyer_id, vehicle_id),
+  FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+);

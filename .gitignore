@@ -4,3 +4,5 @@ carfox.db
 carfox.db-wal
 carfox.db-shm
 *.log
+turso-replica.db
+turso-replica.db-*

@@ -354,6 +354,20 @@ function ensureMessagingTables() {
 
 ensureMessagingTables();
 
+// Buyer saved cars. Created here (not only in db/migrate-add-saved-cars.js) so a fresh
+// or production database gets the table without a manual migration step.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS saved_cars (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    buyer_id INTEGER NOT NULL,
+    vehicle_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(buyer_id, vehicle_id),
+    FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+  );
+`);
+
 // ─── Seed test accounts ───────────────────────────────────────────────────────
 // These accounts are created automatically on every startup so you never need
 // to re-register after a redeploy. Passwords are fixed and memorable.
