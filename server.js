@@ -222,6 +222,47 @@ function addColumnIfMissing(table, column, definition) {
 addColumnIfMissing('dealerships', 'plan', "TEXT NOT NULL DEFAULT 'basic'");
 addColumnIfMissing('dealerships', 'listing_limit', 'INTEGER NOT NULL DEFAULT 50');
 
+// Account suspension (admin-controlled). A suspended dealer can still log in and read, but
+// their listings are hidden everywhere and they cannot list or message. A suspended buyer
+// can browse but cannot message or send inquiries. Unsuspending flips the flag back; nothing
+// else is modified, so everything reappears exactly as it was.
+addColumnIfMissing('dealerships', 'suspended', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('dealerships', 'suspension_reason', 'TEXT');
+addColumnIfMissing('dealerships', 'suspended_at', 'TEXT');
+
+function suspendedError(reason) {
+  const r = reason ? String(reason).trim() : '';
+  return {
+    error: 'Your account has been suspended' + (r ? ': ' + r : '') + '. Contact support.',
+    code: 'SUSPENDED',
+    reason: r || null
+  };
+}
+// After requireDealer: block listing writes for a suspended dealership.
+function dealerSuspendedGuard(req, res, next) {
+  if (req.dealership && req.dealership.suspended) {
+    return res.status(403).json(suspendedError(req.dealership.suspension_reason));
+  }
+  return next();
+}
+// After requireBuyer: block inquiries for a suspended buyer.
+function buyerSuspendedGuard(req, res, next) {
+  if (req.user && req.user.suspended) {
+    return res.status(403).json(suspendedError(req.user.suspension_reason));
+  }
+  return next();
+}
+// After requireMessagingAuth: block new messages from either side while suspended.
+function messagingSuspendedGuard(req, res, next) {
+  if (req.messagingRole === 'buyer' && req.user && req.user.suspended) {
+    return res.status(403).json(suspendedError(req.user.suspension_reason));
+  }
+  if (req.messagingRole === 'dealer' && req.dealership && req.dealership.suspended) {
+    return res.status(403).json(suspendedError(req.dealership.suspension_reason));
+  }
+  return next();
+}
+
 const DEALER_PLANS = {
   basic: { label: 'Basic', listing_limit: 50 },
   pro: { label: 'Pro', listing_limit: 100 },
@@ -385,6 +426,11 @@ function ensureUsersBuyerRole() {
 
 ensureUsersBuyerRole();
 
+// Buyer suspension lives on users (added after the users-table rebuild above).
+addColumnIfMissing('users', 'suspended', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('users', 'suspension_reason', 'TEXT');
+addColumnIfMissing('users', 'suspended_at', 'TEXT');
+
 // Grandfather in everyone who signed up before email verification existed.
 // Runs only ONCE (guarded by app_meta) so it doesn't auto-verify future
 // pending signups on later restarts. Only NEW signups need to verify.
@@ -543,6 +589,37 @@ async function sendDealerDecisionEmail(dealershipId, decision, reason) {
       '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px">' +
       '<h2 style="color:#f97316">' + subject + '</h2>' +
       '<p>Hi ' + escapeHtmlForEmail(row.full_name || 'there') + ',</p>' +
+      body +
+      '<p style="color:#999;font-size:13px">CarFox &middot; Verified dealers only</p>' +
+      '</div>'
+  });
+}
+
+async function sendSuspensionEmail(opts) {
+  if (!opts || !opts.email) return;
+  const reason = opts.reason ? String(opts.reason).trim() : '';
+  const subject = opts.suspended
+    ? 'Your CarFox account has been suspended'
+    : 'Your CarFox account has been reinstated';
+  const body = opts.suspended
+    ? '<p>Your ' + (opts.kind === 'dealer' ? 'dealer' : 'buyer') + ' account' +
+      (opts.businessName ? ' (<strong>' + escapeHtmlForEmail(opts.businessName) + '</strong>)' : '') +
+      ' has been suspended.</p>' +
+      (reason ? '<p><strong>Reason:</strong> ' + escapeHtmlForEmail(reason) + '</p>' : '') +
+      (opts.kind === 'dealer'
+        ? '<p>While suspended, your listings are hidden from buyers and you cannot publish, edit or message. You can still sign in to see this notice.</p>'
+        : '<p>While suspended, you cannot message dealers or send inquiries. You can still sign in and browse.</p>') +
+      '<p>If you believe this is a mistake, reply to this email to contact support.</p>'
+    : '<p>Your account has been reinstated. Everything is back to how it was' +
+      (opts.kind === 'dealer' ? ', including your listings' : '') + '.</p>';
+  await resend.emails.send({
+    from: 'CarFox <noreply@mawtiq.online>',
+    to: opts.email,
+    subject: subject,
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px">' +
+      '<h2 style="color:#f97316">' + subject + '</h2>' +
+      '<p>Hi ' + escapeHtmlForEmail(opts.name || 'there') + ',</p>' +
       body +
       '<p style="color:#999;font-size:13px">CarFox &middot; Verified dealers only</p>' +
       '</div>'
@@ -872,7 +949,7 @@ app.post('/api/auth/verify-otp', function (req, res) {
 // Admin: list dealer applications (pending by default)
 app.get('/api/admin/applications', requireAdmin, function (req, res) {
   var status = String(req.query.status || 'pending').toLowerCase();
-  var allowed = { pending: true, approved: true, rejected: true, all: true };
+  var allowed = { pending: true, approved: true, rejected: true, suspended: true, all: true };
   if (!allowed[status]) status = 'pending';
 
   var baseSql = `
@@ -889,6 +966,9 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
       d.created_at,
       d.plan AS plan,
       d.listing_limit,
+      d.suspended,
+      d.suspension_reason,
+      d.suspended_at,
       u.id AS user_id,
       u.email,
       u.full_name,
@@ -899,6 +979,8 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
   var rows;
   if (status === 'all') {
     rows = db.prepare(baseSql + ' ORDER BY d.created_at DESC').all();
+  } else if (status === 'suspended') {
+    rows = db.prepare(baseSql + ' WHERE COALESCE(d.suspended, 0) = 1 ORDER BY d.suspended_at DESC').all();
   } else {
     rows = db
       .prepare(baseSql + ' WHERE d.status = ? ORDER BY d.created_at DESC')
@@ -920,6 +1002,9 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
       rejection_reason: r.rejection_reason,
       plan: r.plan || 'basic',
       listing_limit: r.listing_limit != null ? r.listing_limit : DEALER_PLANS.basic.listing_limit,
+      suspended: !!r.suspended,
+      suspension_reason: r.suspension_reason || null,
+      suspended_at: r.suspended_at || null,
       created_at: r.created_at,
       user_created_at: r.user_created_at,
       user: {
@@ -968,6 +1053,90 @@ app.patch('/api/admin/applications/:id/reject', requireAdmin, function (req, res
   return res.json({ dealership: updated });
 });
 
+// Admin: suspend / unsuspend a dealership. Only the flag changes; listings keep their status
+// and reappear untouched when the dealer is unsuspended.
+function setDealershipSuspended(req, res, suspended) {
+  var id = Number(req.params.id);
+  var reason = req.body && req.body.reason ? String(req.body.reason).trim().slice(0, 500) : null;
+  var row = db
+    .prepare('SELECT d.id, d.business_name, d.suspended, u.email, u.full_name FROM dealerships d JOIN users u ON u.id = d.user_id WHERE d.id = ?')
+    .get(id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (suspended) {
+    db.prepare('UPDATE dealerships SET suspended = 1, suspension_reason = ?, suspended_at = ? WHERE id = ?')
+      .run(reason, new Date().toISOString(), id);
+  } else {
+    db.prepare('UPDATE dealerships SET suspended = 0, suspension_reason = NULL, suspended_at = NULL WHERE id = ?').run(id);
+  }
+  sendSuspensionEmail({ kind: 'dealer', email: row.email, name: row.full_name, businessName: row.business_name, suspended: suspended, reason: reason })
+    .catch(function (err) { console.error('Failed to send suspension email:', err); });
+  var updated = db
+    .prepare('SELECT id, business_name, status, suspended, suspension_reason, suspended_at FROM dealerships WHERE id = ?')
+    .get(id);
+  updated.suspended = !!updated.suspended;
+  return res.json({ dealership: updated });
+}
+app.patch('/api/admin/dealerships/:id/suspend', requireAdmin, function (req, res) {
+  return setDealershipSuspended(req, res, true);
+});
+app.patch('/api/admin/dealerships/:id/unsuspend', requireAdmin, function (req, res) {
+  return setDealershipSuspended(req, res, false);
+});
+
+// Admin: find buyers (by email) or list suspended buyers
+app.get('/api/admin/users', requireAdmin, function (req, res) {
+  var email = normalizeEmail(req.query.email);
+  var onlySuspended = String(req.query.suspended || '') === '1';
+  var sql = "SELECT id, email, full_name, role, created_at, suspended, suspension_reason, suspended_at FROM users WHERE role = 'buyer'";
+  var params = [];
+  if (email) {
+    sql += ' AND LOWER(email) LIKE ?';
+    params.push('%' + email + '%');
+  }
+  if (onlySuspended) sql += ' AND COALESCE(suspended, 0) = 1';
+  if (!email && !onlySuspended) return res.json({ users: [] });
+  sql += ' ORDER BY created_at DESC LIMIT 50';
+  var rows = db.prepare(sql).all(...params).map(function (u) {
+    return {
+      id: u.id,
+      email: u.email,
+      full_name: u.full_name,
+      role: u.role,
+      created_at: u.created_at,
+      suspended: !!u.suspended,
+      suspension_reason: u.suspension_reason || null,
+      suspended_at: u.suspended_at || null
+    };
+  });
+  return res.json({ users: rows });
+});
+
+// Admin: suspend / unsuspend a buyer
+function setBuyerSuspended(req, res, suspended) {
+  var id = Number(req.params.id);
+  var reason = req.body && req.body.reason ? String(req.body.reason).trim().slice(0, 500) : null;
+  var user = db.prepare('SELECT id, email, full_name, role FROM users WHERE id = ?').get(id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  if (user.role !== 'buyer') return res.status(400).json({ error: 'Only buyer accounts can be suspended here' });
+  if (suspended) {
+    db.prepare('UPDATE users SET suspended = 1, suspension_reason = ?, suspended_at = ? WHERE id = ?')
+      .run(reason, new Date().toISOString(), id);
+  } else {
+    db.prepare('UPDATE users SET suspended = 0, suspension_reason = NULL, suspended_at = NULL WHERE id = ?').run(id);
+  }
+  sendSuspensionEmail({ kind: 'buyer', email: user.email, name: user.full_name, suspended: suspended, reason: reason })
+    .catch(function (err) { console.error('Failed to send suspension email:', err); });
+  var updated = db.prepare('SELECT id, email, full_name, role, suspended, suspension_reason, suspended_at FROM users WHERE id = ?').get(id);
+  updated.suspended = !!updated.suspended;
+  return res.json({ user: updated });
+}
+app.patch('/api/admin/users/:id/suspend', requireAdmin, function (req, res) {
+  return setBuyerSuspended(req, res, true);
+});
+app.patch('/api/admin/users/:id/unsuspend', requireAdmin, function (req, res) {
+  return setBuyerSuspended(req, res, false);
+});
+
 // Admin: set a dealership's membership plan and listing limit
 app.patch('/api/admin/dealerships/:id/plan', requireAdmin, function (req, res) {
   var id = Number(req.params.id);
@@ -1006,7 +1175,7 @@ app.get('/api/auth/me', function (req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   const user = db
-    .prepare('SELECT id, email, full_name, role, phone, created_at, avatar_url FROM users WHERE id = ?')
+    .prepare('SELECT id, email, full_name, role, phone, created_at, avatar_url, suspended, suspension_reason, suspended_at FROM users WHERE id = ?')
     .get(decoded.sub);
   if (!user) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -1014,7 +1183,7 @@ app.get('/api/auth/me', function (req, res) {
   if (user.role === 'dealer') {
     const d = db
       .prepare(
-        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan AS plan, listing_limit FROM dealerships WHERE user_id = ?'
+        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan AS plan, listing_limit, suspended, suspension_reason, suspended_at FROM dealerships WHERE user_id = ?'
       )
       .get(user.id);
     return res.json({
@@ -1024,7 +1193,9 @@ app.get('/api/auth/me', function (req, res) {
         full_name: user.full_name,
         role: user.role,
         avatar_url: user.avatar_url || null,
-        created_at: user.created_at
+        created_at: user.created_at,
+        suspended: !!user.suspended,
+        suspension_reason: user.suspension_reason || null
       },
       dealership: d
         ? {
@@ -1036,7 +1207,10 @@ app.get('/api/auth/me', function (req, res) {
             governorate: (d.governorate || d.city) || null,
             whatsapp: d.whatsapp || null,
             plan: d.plan || 'basic',
-            listing_limit: d.listing_limit != null ? d.listing_limit : DEALER_PLANS.basic.listing_limit
+            listing_limit: d.listing_limit != null ? d.listing_limit : DEALER_PLANS.basic.listing_limit,
+            suspended: !!d.suspended,
+            suspension_reason: d.suspension_reason || null,
+            suspended_at: d.suspended_at || null
           }
         : null
     });
@@ -1047,7 +1221,9 @@ app.get('/api/auth/me', function (req, res) {
     full_name: user.full_name,
     role: user.role,
     avatar_url: user.avatar_url || null,
-    created_at: user.created_at
+    created_at: user.created_at,
+    suspended: !!user.suspended,
+    suspension_reason: user.suspension_reason || null
   };
   if (user.role === 'buyer' && user.phone) payload.phone = user.phone;
   return res.json({ user: payload });
@@ -1204,7 +1380,9 @@ app.get('/api/car-data/models', function (req, res) {
 
 app.get('/api/brands', function (req, res) {
   const rows = db.prepare(
-    "SELECT make, COUNT(*) as count FROM vehicles WHERE status = 'active' GROUP BY make ORDER BY count DESC"
+    "SELECT v.make AS make, COUNT(*) AS count FROM vehicles v INNER JOIN dealerships d ON d.id = v.dealership_id" +
+    " WHERE v.status = 'active' AND d.status = 'approved' AND COALESCE(d.suspended, 0) = 0" +
+    ' GROUP BY v.make ORDER BY count DESC'
   ).all();
   return res.json({ brands: rows });
 });
@@ -1227,7 +1405,7 @@ const PUBLIC_CARS_FROM_SQL = `
   FROM vehicles v
   INNER JOIN dealerships d ON d.id = v.dealership_id`;
 
-const PUBLIC_CARS_BASE_WHERE = "v.status = 'active' AND d.status = 'approved'";
+const PUBLIC_CARS_BASE_WHERE = "v.status = 'active' AND d.status = 'approved' AND COALESCE(d.suspended, 0) = 0";
 
 function parseCsvQueryParam(value) {
   if (value == null || String(value).trim() === '') return [];
@@ -1421,7 +1599,7 @@ app.get('/api/saved-cars/listings', requireBuyer, function (req, res) {
     ' LEFT JOIN vehicle_photos p ON p.vehicle_id = v.id AND p.is_primary = 1' +
     ' INNER JOIN saved_cars sc ON sc.vehicle_id = v.id AND sc.buyer_id = ?' +
     // Sold cars stay in the list (rendered with a Sold badge) so a saved car never silently vanishes.
-    " WHERE d.status = 'approved' AND v.status IN ('active', 'sold')" +
+    " WHERE d.status = 'approved' AND COALESCE(d.suspended, 0) = 0 AND v.status IN ('active', 'sold')" +
     ' ORDER BY sc.created_at DESC'
   ).all(buyerId);
   return res.json({ cars: rows.map(mapPublicCarRow) });
@@ -1460,7 +1638,7 @@ app.get('/api/dealers/:id/profile', function (req, res) {
               COUNT(v.id) AS total_listings
        FROM dealerships d
        LEFT JOIN vehicles v ON v.dealership_id = d.id AND v.status = 'active'
-       WHERE d.id = ? AND d.status = 'approved'
+       WHERE d.id = ? AND d.status = 'approved' AND COALESCE(d.suspended, 0) = 0
        GROUP BY d.id`
     )
     .get(dealerId);
@@ -1483,7 +1661,7 @@ app.get('/api/dealers/:id/profile', function (req, res) {
        FROM vehicles v
        INNER JOIN dealerships d ON d.id = v.dealership_id
        LEFT JOIN vehicle_photos p ON p.vehicle_id = v.id AND p.is_primary = 1
-       WHERE v.dealership_id = ? AND v.status = 'active' AND d.status = 'approved'
+       WHERE v.dealership_id = ? AND v.status = 'active' AND d.status = 'approved' AND COALESCE(d.suspended, 0) = 0
        ORDER BY v.published_at DESC
        LIMIT 24`
     )
@@ -1707,7 +1885,7 @@ app.get('/api/cars/:id', function (req, res) {
         d.city AS dealer_city, d.state AS dealer_state, d.phone AS dealer_phone,
         d.whatsapp AS dealer_whatsapp
       ${PUBLIC_CARS_FROM_SQL}
-      WHERE v.id = ? AND d.status = 'approved' AND v.status IN ('active', 'sold')`
+      WHERE v.id = ? AND d.status = 'approved' AND COALESCE(d.suspended, 0) = 0 AND v.status IN ('active', 'sold')`
     )
     .get(vehicleId);
 
@@ -1738,7 +1916,7 @@ app.post('/api/cars/:id/view', function (req, res) {
       `UPDATE vehicles SET views = COALESCE(views, 0) + 1
        WHERE id = ? AND status = 'active'
        AND dealership_id IN (
-         SELECT id FROM dealerships WHERE status = 'approved'
+         SELECT id FROM dealerships WHERE status = 'approved' AND COALESCE(suspended, 0) = 0
        )`
     )
     .run(vehicleId);
@@ -1752,7 +1930,7 @@ app.post('/api/cars/:id/view', function (req, res) {
   return res.json({ views: views });
 });
 
-app.post('/api/inquiries', requireBuyer, function (req, res) {
+app.post('/api/inquiries', requireBuyer, buyerSuspendedGuard, function (req, res) {
   const body = req.body || {};
   const vehicleId = Number(body.vehicle_id);
   const message = String(body.message || '').trim();
@@ -1844,6 +2022,7 @@ function wsBroadcastMessage(conversationId, message, senderUserId) {
 app.post(
   '/api/conversations/:id/attachments/upload',
   requireMessagingAuth,
+  messagingSuspendedGuard,
   function (req, res, next) {
     const messagingUpload = multer({
       storage: multer.memoryStorage(),
@@ -1960,7 +2139,7 @@ app.get('/api/conversations/unread-count', requireMessagingAuth, function (req, 
   return res.status(401).json({ error: 'Unauthorized' });
 });
 
-app.post('/api/conversations', requireMessagingAuth, function (req, res) {
+app.post('/api/conversations', requireMessagingAuth, messagingSuspendedGuard, function (req, res) {
   if (req.messagingRole === 'dealer') {
     return res.status(400).json({ error: 'Dealers cannot start conversations in v1.' });
   }
@@ -2059,7 +2238,7 @@ app.get('/api/conversations/:id/messages', requireMessagingAuth, function (req, 
   return res.json({ messages: messages, has_more: loaded.has_more });
 });
 
-app.post('/api/conversations/:id/messages', requireMessagingAuth, function (req, res) {
+app.post('/api/conversations/:id/messages', requireMessagingAuth, messagingSuspendedGuard, function (req, res) {
   const conversationId = Number(req.params.id);
   if (!conversationId) {
     return res.status(400).json({ error: 'Invalid conversation id' });
@@ -2209,7 +2388,7 @@ app.get('/api/dealer/vehicles', requireDealer, function (req, res) {
 });
 
 // Dealer: silent draft on add-vehicle page load
-app.post('/api/vehicles/draft', requireDealer, function (req, res) {
+app.post('/api/vehicles/draft', requireDealer, dealerSuspendedGuard, function (req, res) {
   const createdAt = new Date().toISOString();
   const year = currentYear();
   try {
@@ -2258,7 +2437,7 @@ app.get('/api/vehicles/:id', requireDealer, function (req, res) {
   });
 });
 
-app.patch('/api/vehicles/:id', requireDealer, function (req, res) {
+app.patch('/api/vehicles/:id', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.id);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const existing = db
@@ -2289,7 +2468,7 @@ app.patch('/api/vehicles/:id', requireDealer, function (req, res) {
   return res.json({ vehicle: row });
 });
 
-app.post('/api/vehicles/:id/publish', requireDealer, function (req, res) {
+app.post('/api/vehicles/:id/publish', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.id);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const vehicle = db
@@ -2324,7 +2503,7 @@ app.post('/api/vehicles/:id/publish', requireDealer, function (req, res) {
   return res.json({ vehicle: row });
 });
 
-app.delete('/api/vehicles/:id', requireDealer, function (req, res) {
+app.delete('/api/vehicles/:id', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.id);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const vehicle = db
@@ -2341,7 +2520,7 @@ app.delete('/api/vehicles/:id', requireDealer, function (req, res) {
   return res.status(200).json({ message: 'Listing archived' });
 });
 
-app.post('/api/vehicles/:id/pause', requireDealer, function (req, res) {
+app.post('/api/vehicles/:id/pause', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.id);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const vehicle = db
@@ -2357,7 +2536,7 @@ app.post('/api/vehicles/:id/pause', requireDealer, function (req, res) {
   return res.json({ vehicle: row });
 });
 
-app.post('/api/vehicles/:id/resume', requireDealer, function (req, res) {
+app.post('/api/vehicles/:id/resume', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.id);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const vehicle = db
@@ -2373,7 +2552,7 @@ app.post('/api/vehicles/:id/resume', requireDealer, function (req, res) {
   return res.json({ vehicle: row });
 });
 
-app.post('/api/vehicles/:id/mark-sold', requireDealer, function (req, res) {
+app.post('/api/vehicles/:id/mark-sold', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.id);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const vehicle = db
@@ -2393,7 +2572,7 @@ app.post('/api/vehicles/:id/mark-sold', requireDealer, function (req, res) {
 });
 
 // Dealer: create vehicle (approved dealers only) — legacy one-shot create
-app.post('/api/vehicles', requireDealer, function (req, res) {
+app.post('/api/vehicles', requireDealer, dealerSuspendedGuard, function (req, res) {
   const b = req.body || {};
   const chassisRaw = String(b.chassis_number != null ? b.chassis_number : b.vin || '').trim();
   const vin = chassisRaw ? chassisRaw.toUpperCase() : '';
@@ -2482,6 +2661,7 @@ function r2Configured() {
 app.post(
   '/api/vehicles/:id/photos',
   requireDealer,
+  dealerSuspendedGuard,
   function (req, res, next) {
     photoUpload.single('photo')(req, res, function (err) {
       if (err) {
@@ -2585,6 +2765,7 @@ app.post(
 app.delete(
   '/api/vehicles/:vehicleId/photos/:photoId',
   requireDealer,
+  dealerSuspendedGuard,
   async function (req, res) {
     const vehicleId = Number(req.params.vehicleId);
     const photoId = Number(req.params.photoId);
@@ -2625,7 +2806,7 @@ app.delete(
   }
 );
 
-app.patch('/api/vehicles/:vehicleId/photos/reorder', requireDealer, function (req, res) {
+app.patch('/api/vehicles/:vehicleId/photos/reorder', requireDealer, dealerSuspendedGuard, function (req, res) {
   const vehicleId = Number(req.params.vehicleId);
   if (!vehicleId) return res.status(400).json({ error: 'Invalid vehicle id' });
   const vehicle = getDealerVehicle(vehicleId, req.dealership.id);

@@ -18,7 +18,7 @@ module.exports = function requireMessagingAuthFactory(db, jwtSecret) {
     }
 
     const user = db
-      .prepare('SELECT id, email, full_name, role, phone FROM users WHERE id = ?')
+      .prepare('SELECT id, email, full_name, role, phone, suspended, suspension_reason FROM users WHERE id = ?')
       .get(decoded.sub);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -28,7 +28,7 @@ module.exports = function requireMessagingAuthFactory(db, jwtSecret) {
     if (user.role === 'dealer') {
       const dealership = db
         .prepare(
-          'SELECT id, status, business_name, city, state FROM dealerships WHERE user_id = ?'
+          'SELECT id, status, business_name, city, state, suspended, suspension_reason FROM dealerships WHERE user_id = ?'
         )
         .get(user.id);
       if (!dealership || dealership.status !== 'approved') {

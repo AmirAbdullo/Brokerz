@@ -768,6 +768,18 @@
           if (e.target === lightbox) { lightbox.classList.add('hidden'); lightboxImg.src = ''; }
         });
 
+        function disableComposerForSuspension(reason) {
+          composerInput.disabled = true;
+          composerInput.placeholder = 'Messaging is disabled while your account is suspended.';
+          sendBtn.disabled = true;
+          attachBtn.disabled = true;
+          cameraBtn.disabled = true;
+          const note = document.createElement('div');
+          note.className = 'bg-red-50 border border-red-200 text-red-800 text-xs font-semibold px-4 py-2 text-center rounded-lg mx-4 mt-3';
+          note.textContent = 'Your account has been suspended' + (reason ? ': ' + reason : '') + '. You can read messages but not send new ones. Contact support.';
+          chatMain.insertBefore(note, chatMain.firstChild);
+        }
+
         const returnPath = '/dealer/chat.html?conversation=' + conversationId;
 
         CarfoxDealerNav.requireDealerPageAuth(returnPath).then(function (s) {
@@ -775,6 +787,7 @@
           session = s;
           currentUserId = s.user.id;
           CarfoxDealerNav.mountDealerDesktopHeader('inquiries');
+          if (s.dealership && s.dealership.suspended) disableComposerForSuspension(s.dealership.suspension_reason);
 
           return loadConversationMeta()
             .then(function () { return fetchMessages(true); })

@@ -48,6 +48,11 @@
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2 text-sm font-medium" id="toastBannerText"></div>
     </div>
 
+    <!-- Suspension banner -->
+    <div id="suspendedBanner" class="hidden bg-red-50 border-b border-red-200 text-red-800">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2 text-sm font-semibold"></div>
+    </div>
+
     <!-- Status banner (shown only if not approved) -->
     <div id="statusBanner" class="hidden bg-yellow-50 border-b border-yellow-200 text-yellow-800">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2 text-sm">
@@ -207,6 +212,16 @@
             });
           }
 
+          if (data.dealership && data.dealership.suspended) {
+            const sb = document.getElementById('suspendedBanner');
+            const reason = data.dealership.suspension_reason ? String(data.dealership.suspension_reason).trim() : '';
+            sb.firstElementChild.textContent = 'Your account has been suspended' + (reason ? ': ' + reason : '') + '. Contact support. Your listings are hidden until the suspension is lifted.';
+            sb.classList.remove('hidden');
+            document.querySelectorAll('#app a[href="/dealer/add-vehicle.html"]').forEach(function (a) {
+              a.classList.add('hidden');
+            });
+          }
+
           await loadDashboardData(token);
 
           CarfoxDealerNav.mountDealerBottomNav(
@@ -214,7 +229,8 @@
             'dashboard'
           );
           CarfoxDealerNav.mountDealerDesktopHeader('dashboard', {
-            dealershipStatus: data.dealership ? data.dealership.status : null
+            dealershipStatus: data.dealership ? data.dealership.status : null,
+            suspended: !!(data.dealership && data.dealership.suspended)
           });
 
           // Show app

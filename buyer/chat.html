@@ -761,10 +761,23 @@
         const returnPath =
           '/buyer/chat.html?conversation=' + conversationId + (prefill ? '&prefill=1' : '');
 
+        function disableComposerForSuspension(reason) {
+          composerInput.disabled = true;
+          composerInput.placeholder = 'Messaging is disabled while your account is suspended.';
+          sendBtn.disabled = true;
+          attachBtn.disabled = true;
+          cameraBtn.disabled = true;
+          const note = document.createElement('div');
+          note.className = 'bg-red-50 border border-red-200 text-red-800 text-xs font-semibold px-4 py-2 text-center rounded-lg mx-4 mt-3';
+          note.textContent = 'Your account has been suspended' + (reason ? ': ' + reason : '') + '. You can read messages but not send new ones. Contact support.';
+          chatMain.insertBefore(note, chatMain.firstChild);
+        }
+
         CarfoxBuyerNav.requireBuyerPageAuth(returnPath).then(function (s) {
           if (!s) return;
           session = s;
           currentUserId = s.user.id;
+          if (s.user && s.user.suspended) disableComposerForSuspension(s.user.suspension_reason);
 
           return loadConversationMeta()
             .then(function () { return fetchMessages(true); })

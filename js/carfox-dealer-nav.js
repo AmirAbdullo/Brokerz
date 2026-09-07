@@ -66,6 +66,23 @@
     } catch (_) {}
   }
 
+
+  // Red banner shown to a suspended account (dealer or buyer). Reads suspended/suspension_reason.
+  function mountSuspensionBanner(subject) {
+    if (!subject || !subject.suspended || document.getElementById('suspensionBanner')) return;
+    var reason = subject.suspension_reason ? String(subject.suspension_reason).trim() : '';
+    var el = document.createElement('div');
+    el.id = 'suspensionBanner';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'background:#fef2f2;border-bottom:1px solid #fecaca;color:#991b1b;padding:10px 16px;font-size:14px;font-weight:600;text-align:center;';
+    el.textContent = 'Your account has been suspended' + (reason ? ': ' + reason : '') + '. Contact support.';
+    document.body.insertBefore(el, document.body.firstChild);
+  }
+
+  // Remembered from requireDealerPageAuth so mountDealerDesktopHeader can hide "+ Add Vehicle"
+  // for pending or suspended dealers even when the page does not pass options.
+  var lastDealership = null;
+
   function requireDealerPageAuth(returnTo) {
     const loginUrl =
       '/dealer/login.html?returnTo=' +
@@ -106,6 +123,8 @@
         try {
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         } catch (_) {}
+        mountSuspensionBanner(data.dealership);
+        lastDealership = data.dealership;
         return { user: data.user, dealership: data.dealership, token: token };
       })
       .catch(function () {
@@ -349,13 +368,17 @@
   function mountDealerDesktopHeader(activeTab, options) {
     if (document.getElementById('dealerDesktopHeader')) return;
     options = options || {};
+    if (lastDealership) {
+      if (options.dealershipStatus == null) options.dealershipStatus = lastDealership.status;
+      if (options.suspended == null) options.suspended = !!lastDealership.suspended;
+    }
     let user = null;
     try {
       user = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
     } catch (_) {}
 
     document.body.insertAdjacentHTML('afterbegin', dealerDesktopHeaderHtml(activeTab, user));
-    if (options.dealershipStatus && options.dealershipStatus !== 'approved') {
+    if ((options.dealershipStatus && options.dealershipStatus !== 'approved') || options.suspended) {
       const addLink = document.querySelector('#dealerDesktopHeader a[href="/dealer/add-vehicle.html"]');
       if (addLink) addLink.classList.add('hidden');
     }

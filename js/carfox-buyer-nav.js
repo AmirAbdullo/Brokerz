@@ -72,6 +72,19 @@
     } catch (_) {}
   }
 
+
+  // Red banner shown to a suspended account (dealer or buyer). Reads suspended/suspension_reason.
+  function mountSuspensionBanner(subject) {
+    if (!subject || !subject.suspended || document.getElementById('suspensionBanner')) return;
+    var reason = subject.suspension_reason ? String(subject.suspension_reason).trim() : '';
+    var el = document.createElement('div');
+    el.id = 'suspensionBanner';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'background:#fef2f2;border-bottom:1px solid #fecaca;color:#991b1b;padding:10px 16px;font-size:14px;font-weight:600;text-align:center;';
+    el.textContent = 'Your account has been suspended' + (reason ? ': ' + reason : '') + '. Contact support.';
+    document.body.insertBefore(el, document.body.firstChild);
+  }
+
   function requireBuyerPageAuth(returnTo) {
     const token = (function () {
       try {
@@ -119,6 +132,7 @@
         try {
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         } catch (_) {}
+        mountSuspensionBanner(data.user);
         return { user: data.user, token: token };
       })
       .catch(function () {

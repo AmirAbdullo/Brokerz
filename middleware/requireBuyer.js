@@ -17,7 +17,7 @@ module.exports = function requireBuyerFactory(db, jwtSecret) {
       return res.status(401).json({ error: 'Invalid token' });
     }
     const user = db
-      .prepare('SELECT id, email, full_name, role, phone FROM users WHERE id = ?')
+      .prepare('SELECT id, email, full_name, role, phone, suspended, suspension_reason FROM users WHERE id = ?')
       .get(decoded.sub);
     if (!user) return res.status(401).json({ error: 'Invalid token' });
     if (user.role !== 'buyer') {

@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS users (
   phone TEXT,
   google_id TEXT UNIQUE,
   auth_provider TEXT NOT NULL DEFAULT 'email',
+  suspended INTEGER NOT NULL DEFAULT 0,
+  suspension_reason TEXT,
+  suspended_at TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -32,6 +35,9 @@ CREATE TABLE IF NOT EXISTS dealerships (
   rejection_reason TEXT,
   plan TEXT NOT NULL DEFAULT 'basic',
   listing_limit INTEGER NOT NULL DEFAULT 50,
+  suspended INTEGER NOT NULL DEFAULT 0,
+  suspension_reason TEXT,
+  suspended_at TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

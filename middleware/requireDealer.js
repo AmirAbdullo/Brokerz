@@ -19,7 +19,7 @@ module.exports = function requireDealerFactory(db, jwtSecret) {
     const user = db.prepare('SELECT id, email, full_name, role FROM users WHERE id = ?').get(decoded.sub);
     if (!user) return res.status(401).json({ error: 'Invalid token' });
     if (user.role !== 'dealer') return res.status(403).json({ error: 'Only approved dealers can list vehicles' });
-    const dealership = db.prepare('SELECT id, status, business_name FROM dealerships WHERE user_id = ?').get(user.id);
+    const dealership = db.prepare('SELECT id, status, business_name, suspended, suspension_reason, suspended_at FROM dealerships WHERE user_id = ?').get(user.id);
     if (!dealership || dealership.status !== 'approved') {
       return res.status(403).json({ error: 'Only approved dealers can list vehicles' });
     }
