@@ -346,14 +346,19 @@
     );
   }
 
-  function mountDealerDesktopHeader(activeTab) {
+  function mountDealerDesktopHeader(activeTab, options) {
     if (document.getElementById('dealerDesktopHeader')) return;
+    options = options || {};
     let user = null;
     try {
       user = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
     } catch (_) {}
 
     document.body.insertAdjacentHTML('afterbegin', dealerDesktopHeaderHtml(activeTab, user));
+    if (options.dealershipStatus && options.dealershipStatus !== 'approved') {
+      const addLink = document.querySelector('#dealerDesktopHeader a[href="/dealer/add-vehicle.html"]');
+      if (addLink) addLink.classList.add('hidden');
+    }
 
     const btn = document.getElementById('dealerHeaderProfileBtn');
     const menu = document.getElementById('dealerHeaderProfileMenu');

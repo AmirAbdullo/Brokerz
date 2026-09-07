@@ -165,6 +165,8 @@
       const AUTOSAVE_MS = 500;
 
       let vehicleId = null;
+      let formDirty = false;
+      let draftPromise = null;
       let isEditMode = false;
       let modelUseTextInput = false;
       let photoItems = [];
@@ -204,6 +206,23 @@
         const h = { Authorization: 'Bearer ' + token() };
         if (json) h['Content-Type'] = 'application/json';
         return h;
+      }
+      // The draft row is created lazily on the first real edit (or photo upload) so that
+      // opening and abandoning the page leaves no empty drafts behind.
+      function ensureDraft() {
+        if (vehicleId) return Promise.resolve(vehicleId);
+        if (!draftPromise) {
+          draftPromise = fetch('/api/vehicles/draft', { method: 'POST', headers: authHeaders(true) })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+              if (!res.ok || !res.body || !res.body.vehicle) throw new Error((res.body && res.body.error) || 'Could not start draft');
+              vehicleId = res.body.vehicle.id;
+              history.replaceState(null, '', '/dealer/add-vehicle.html?id=' + vehicleId);
+              return vehicleId;
+            })
+            .catch(function (e) { draftPromise = null; throw e; });
+        }
+        return draftPromise;
       }
       function showToast(msg) {
         toast.textContent = msg;
@@ -267,12 +286,14 @@
       }
 
       function scheduleAutosave() {
+        formDirty = true;
         clearTimeout(saveTimer);
         saveTimer = setTimeout(flushAutosave, AUTOSAVE_MS);
       }
 
       async function flushAutosave() {
-        if (!vehicleId || autosaveInFlight) return;
+        if (autosaveInFlight) return;
+        if (!vehicleId && !formDirty) return;
         autosaveInFlight = true;
         const payload = buildPayload();
         if (Object.keys(payload).length === 0) {
@@ -280,6 +301,7 @@
           return;
         }
         try {
+          await ensureDraft();
           const r = await fetch('/api/vehicles/' + vehicleId, {
             method: 'PATCH',
             headers: authHeaders(true),
@@ -607,6 +629,7 @@
         const fd = new FormData();
         fd.append('photo', item.file);
         try {
+          await ensureDraft();
           const r = await fetch('/api/vehicles/' + vehicleId + '/photos', {
             method: 'POST',
             headers: { Authorization: 'Bearer ' + token() },
@@ -719,6 +742,7 @@
       }
 
       async function patchAll(status) {
+        await ensureDraft();
         const payload = buildPayload();
         if (status) payload.status = status;
         const r = await fetch('/api/vehicles/' + vehicleId, {
@@ -734,6 +758,11 @@
       document.getElementById('saveDraftBtn').addEventListener('click', async function () {
         try {
           clearTimeout(saveTimer);
+          if (!vehicleId && !formDirty && countDonePhotos() === 0) {
+            // Nothing entered: don't create an empty draft
+            window.location.href = '/dealer/dashboard.html';
+            return;
+          }
           await patchAll('draft');
           window.location.href = '/dealer/dashboard.html?draft=1';
         } catch (e) {
@@ -783,13 +812,8 @@
           const data = await r.json();
           await fillFormFromVehicle(data.vehicle);
           loadServerPhotos(data.photos);
-        } else {
-          const dr = await fetch('/api/vehicles/draft', { method: 'POST', headers: authHeaders(true) });
-          const dd = await dr.json();
-          if (!dr.ok) { pageLoading.innerHTML = '<p class="text-red-600">Could not start draft</p>'; return; }
-          vehicleId = dd.vehicle.id;
-          history.replaceState(null, '', '/dealer/add-vehicle.html?id=' + vehicleId);
         }
+        // No id in the URL: ensureDraft() creates the row on the first edit or photo upload.
 
         pageLoading.classList.add('hidden');
         pageContent.classList.remove('hidden');

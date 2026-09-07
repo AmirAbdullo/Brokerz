@@ -198,7 +198,9 @@
             document.getElementById('dealerBottomNav'),
             'dashboard'
           );
-          CarfoxDealerNav.mountDealerDesktopHeader('dashboard');
+          CarfoxDealerNav.mountDealerDesktopHeader('dashboard', {
+            dealershipStatus: data.dealership ? data.dealership.status : null
+          });
 
           // Show app
           document.getElementById('app').classList.remove('app-hidden');

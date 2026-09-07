@@ -1277,7 +1277,8 @@ function mapPublicCarRow(row) {
       state: row.dealer_state,
       governorate: governorate
     },
-    published_at: row.published_at
+    published_at: row.published_at,
+    status: row.status || 'active'
   };
 }
 
@@ -1306,14 +1307,15 @@ app.get('/api/saved-cars/listings', requireBuyer, function (req, res) {
   const buyerId = req.user.id;
   const rows = db.prepare(
     'SELECT v.id, v.year, v.make, v.model, v.trim, v.mileage, v.price, v.body_type,' +
-    '       v.transmission, v.fuel_type, v.exterior_color, v.published_at,' +
+    '       v.transmission, v.fuel_type, v.exterior_color, v.published_at, v.status,' +
     '       p.url AS primary_photo_url,' +
     '       d.id AS dealer_id, d.business_name AS dealer_business_name,' +
     '       d.city AS dealer_city, d.state AS dealer_state' +
     ' ' + PUBLIC_CARS_FROM_SQL +
     ' LEFT JOIN vehicle_photos p ON p.vehicle_id = v.id AND p.is_primary = 1' +
     ' INNER JOIN saved_cars sc ON sc.vehicle_id = v.id AND sc.buyer_id = ?' +
-    ' WHERE ' + PUBLIC_CARS_BASE_WHERE +
+    // Sold cars stay in the list (rendered with a Sold badge) so a saved car never silently vanishes.
+    " WHERE d.status = 'approved' AND v.status IN ('active', 'sold')" +
     ' ORDER BY sc.created_at DESC'
   ).all(buyerId);
   return res.json({ cars: rows.map(mapPublicCarRow) });
@@ -1599,7 +1601,7 @@ app.get('/api/cars/:id', function (req, res) {
         d.city AS dealer_city, d.state AS dealer_state, d.phone AS dealer_phone,
         d.whatsapp AS dealer_whatsapp
       ${PUBLIC_CARS_FROM_SQL}
-      WHERE v.id = ? AND ${PUBLIC_CARS_BASE_WHERE}`
+      WHERE v.id = ? AND d.status = 'approved' AND v.status IN ('active', 'sold')`
     )
     .get(vehicleId);
 
