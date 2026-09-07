@@ -199,6 +199,53 @@ if (!hasDbColumn('dealerships', 'governorate')) {
 if (!hasDbColumn('dealerships', 'whatsapp')) {
   db.exec('ALTER TABLE dealerships ADD COLUMN whatsapp TEXT;');
 }
+// Dealer membership (phase 1, no payments): plan name + how many listings it allows.
+if (!hasDbColumn('dealerships', 'plan')) {
+  db.exec("ALTER TABLE dealerships ADD COLUMN plan TEXT NOT NULL DEFAULT 'basic';");
+}
+if (!hasDbColumn('dealerships', 'listing_limit')) {
+  db.exec('ALTER TABLE dealerships ADD COLUMN listing_limit INTEGER NOT NULL DEFAULT 50;');
+}
+
+const DEALER_PLANS = {
+  basic: { label: 'Basic', listing_limit: 50 },
+  pro: { label: 'Pro', listing_limit: 100 },
+  custom: { label: 'Custom', listing_limit: null }
+};
+const LISTING_LIMIT_MESSAGE = "You've reached your plan's listing limit. Upgrade to add more.";
+
+function getDealerPlan(dealershipId) {
+  const row = db.prepare('SELECT plan, listing_limit FROM dealerships WHERE id = ?').get(dealershipId);
+  const plan = row && row.plan ? String(row.plan) : 'basic';
+  const limit = row && row.listing_limit != null ? Number(row.listing_limit) : DEALER_PLANS.basic.listing_limit;
+  return { plan: plan, listing_limit: limit };
+}
+
+// Listings that count against the plan: everything published (active, paused, sold).
+// Drafts and archived vehicles are free, so a dealer can always prepare a listing.
+function countPlanListings(dealershipId, excludeVehicleId) {
+  const row = db
+    .prepare(
+      "SELECT COUNT(*) AS c FROM vehicles WHERE dealership_id = ? AND status IN ('active', 'paused', 'sold') AND id != ?"
+    )
+    .get(dealershipId, excludeVehicleId || 0);
+  return row.c;
+}
+
+function listingLimitError(dealershipId, excludeVehicleId) {
+  const plan = getDealerPlan(dealershipId);
+  const used = countPlanListings(dealershipId, excludeVehicleId);
+  if (used >= plan.listing_limit) {
+    return {
+      error: LISTING_LIMIT_MESSAGE,
+      code: 'LISTING_LIMIT',
+      plan: plan.plan,
+      listing_limit: plan.listing_limit,
+      listings_used: used
+    };
+  }
+  return null;
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS email_verification_tokens (
@@ -825,6 +872,8 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
       d.approved_by,
       d.rejection_reason,
       d.created_at,
+      d.plan,
+      d.listing_limit,
       u.id AS user_id,
       u.email,
       u.full_name,
@@ -854,6 +903,8 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
       status: r.status,
       approved_at: r.approved_at,
       rejection_reason: r.rejection_reason,
+      plan: r.plan || 'basic',
+      listing_limit: r.listing_limit != null ? r.listing_limit : DEALER_PLANS.basic.listing_limit,
       created_at: r.created_at,
       user_created_at: r.user_created_at,
       user: {
@@ -902,6 +953,30 @@ app.patch('/api/admin/applications/:id/reject', requireAdmin, function (req, res
   return res.json({ dealership: updated });
 });
 
+// Admin: set a dealership's membership plan and listing limit
+app.patch('/api/admin/dealerships/:id/plan', requireAdmin, function (req, res) {
+  var id = Number(req.params.id);
+  var body = req.body || {};
+  var plan = String(body.plan || '').trim().toLowerCase();
+  if (!DEALER_PLANS[plan]) {
+    return res.status(400).json({ error: 'plan must be one of: ' + Object.keys(DEALER_PLANS).join(', ') });
+  }
+  var limit;
+  if (plan === 'custom') {
+    limit = Number(body.listing_limit);
+    if (!Number.isInteger(limit) || limit < 0 || limit > 100000) {
+      return res.status(400).json({ error: 'listing_limit must be a whole number between 0 and 100000' });
+    }
+  } else {
+    limit = DEALER_PLANS[plan].listing_limit;
+  }
+  var row = db.prepare('SELECT id FROM dealerships WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  db.prepare('UPDATE dealerships SET plan = ?, listing_limit = ? WHERE id = ?').run(plan, limit, id);
+  var updated = db.prepare('SELECT id, business_name, status, plan, listing_limit FROM dealerships WHERE id = ?').get(id);
+  return res.json({ dealership: updated });
+});
+
 // Auth: current user (and dealership for dealers)
 app.get('/api/auth/me', function (req, res) {
   const header = req.headers.authorization || '';
@@ -924,7 +999,7 @@ app.get('/api/auth/me', function (req, res) {
   if (user.role === 'dealer') {
     const d = db
       .prepare(
-        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp FROM dealerships WHERE user_id = ?'
+        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan, listing_limit FROM dealerships WHERE user_id = ?'
       )
       .get(user.id);
     return res.json({
@@ -944,7 +1019,9 @@ app.get('/api/auth/me', function (req, res) {
             phone: d.phone || null,
             address: d.address || null,
             governorate: (d.governorate || d.city) || null,
-            whatsapp: d.whatsapp || null
+            whatsapp: d.whatsapp || null,
+            plan: d.plan || 'basic',
+            listing_limit: d.listing_limit != null ? d.listing_limit : DEALER_PLANS.basic.listing_limit
           }
         : null
     });
@@ -2061,13 +2138,17 @@ app.get('/api/dealer/stats', requireDealer, function (req, res) {
     )
     .get(dealershipId).c;
 
+  const plan = getDealerPlan(dealershipId);
   return res.json({
     active_listings: activeListings,
     draft_listings: draftListings,
     total_listings: totalListings,
     total_views_30d: totalViews30d,
     new_inquiries: newInquiries,
-    sold_this_month: soldThisMonth
+    sold_this_month: soldThisMonth,
+    plan: plan.plan,
+    listing_limit: plan.listing_limit,
+    listings_used: countPlanListings(dealershipId, 0)
   });
 });
 
@@ -2212,6 +2293,12 @@ app.post('/api/vehicles/:id/publish', requireDealer, function (req, res) {
   const publishErr = validateForPublish(vehicle, photoCount);
   if (publishErr) return res.status(400).json(publishErr);
 
+  // Plan limit: only vehicles that are not already counted (drafts) can push the dealer over.
+  if (vehicle.status === 'draft') {
+    const limitErr = listingLimitError(req.dealership.id, vehicleId);
+    if (limitErr) return res.status(403).json(limitErr);
+  }
+
   const publishedAt = new Date().toISOString();
   db.prepare("UPDATE vehicles SET status = 'active', published_at = ?, updated_at = ? WHERE id = ?").run(
     publishedAt,
@@ -2319,6 +2406,11 @@ app.post('/api/vehicles', requireDealer, function (req, res) {
   if (!model) return res.status(400).json({ error: 'model is required' });
   if (!Number.isInteger(price) || price <= 0) return res.status(400).json({ error: 'price must be a positive integer (cents)' });
   if (mileage != null && (!Number.isInteger(mileage) || mileage < 0)) return res.status(400).json({ error: 'mileage must be a non-negative integer' });
+
+  if (status === 'active') {
+    const limitErr = listingLimitError(req.dealership.id, 0);
+    if (limitErr) return res.status(403).json(limitErr);
+  }
 
   const createdAt = new Date().toISOString();
   const stmt = db.prepare(`

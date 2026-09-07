@@ -85,6 +85,21 @@
         </div>
       </section>
 
+      <!-- Plan usage -->
+      <section id="planUsage" class="hidden mt-4 bg-white border border-gray-200 rounded-lg p-4">
+        <div class="flex items-center justify-between gap-3 text-sm">
+          <div>
+            <span class="font-semibold text-gray-900" id="planUsageText">— of — listings used</span>
+            <span class="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700" id="planUsageBadge">—</span>
+          </div>
+          <a href="/pricing.html" class="text-sm font-semibold text-blue-700 hover:text-blue-800">View plans</a>
+        </div>
+        <div class="mt-2 h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+          <div id="planUsageBar" class="h-2 rounded-full bg-blue-600 transition-all" style="width: 0%"></div>
+        </div>
+        <p id="planUsageNote" class="hidden mt-2 text-xs text-gray-600"></p>
+      </section>
+
       <!-- Primary action -->
       <section class="mt-6">
         <a href="/dealer/add-vehicle.html"
@@ -355,6 +370,33 @@
         }
       }
 
+      function renderPlanUsage(stats) {
+        if (stats.listing_limit == null) return;
+        const used = Number(stats.listings_used || 0);
+        const limit = Number(stats.listing_limit);
+        const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 100;
+        const planLabel = stats.plan ? stats.plan.charAt(0).toUpperCase() + stats.plan.slice(1) : 'Basic';
+
+        document.getElementById('planUsageText').textContent = used + ' of ' + limit + ' listings used';
+        document.getElementById('planUsageBadge').textContent = planLabel + ' plan';
+        const bar = document.getElementById('planUsageBar');
+        bar.style.width = pct + '%';
+        bar.className = 'h-2 rounded-full transition-all ' +
+          (used >= limit ? 'bg-red-600' : pct >= 80 ? 'bg-amber-500' : 'bg-blue-600');
+
+        const note = document.getElementById('planUsageNote');
+        if (used >= limit) {
+          note.textContent = "You've reached your plan's listing limit. Upgrade to add more, or archive sold listings to free up space.";
+          note.className = 'mt-2 text-xs font-medium text-red-700';
+        } else if (pct >= 80) {
+          note.textContent = (limit - used) + ' listing' + (limit - used === 1 ? '' : 's') + ' left on your plan.';
+          note.className = 'mt-2 text-xs text-amber-700';
+        } else {
+          note.className = 'hidden mt-2 text-xs text-gray-600';
+        }
+        document.getElementById('planUsage').classList.remove('hidden');
+      }
+
       async function loadDashboardData(token) {
         const headers = { Authorization: 'Bearer ' + token };
         const [statsRes, vehiclesRes, unreadRes, convRes] = await Promise.all([
@@ -369,6 +411,7 @@
           document.getElementById('statActive').textContent = formatStatNumber(stats.active_listings);
           document.getElementById('statViews').textContent = formatStatNumber(stats.total_views_30d);
           document.getElementById('statSold').textContent = formatStatNumber(stats.sold_this_month);
+          renderPlanUsage(stats);
         }
 
         if (unreadRes.ok) {

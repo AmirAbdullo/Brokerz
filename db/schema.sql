@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS dealerships (
   approved_at TEXT,
   approved_by INTEGER,
   rejection_reason TEXT,
+  plan TEXT NOT NULL DEFAULT 'basic',
+  listing_limit INTEGER NOT NULL DEFAULT 50,
   created_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
