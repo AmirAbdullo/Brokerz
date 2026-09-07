@@ -224,6 +224,7 @@
               return;
             }
             localStorage.setItem(TOKEN_KEY, body.token);
+            if (body.user) localStorage.setItem(USER_KEY, JSON.stringify(body.user));
             window.location.href = postLoginRedirect();
             return;
           }

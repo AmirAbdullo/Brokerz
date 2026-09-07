@@ -187,6 +187,9 @@
             const txt = document.getElementById('dealStatusText');
             txt.textContent = data.dealership.status;
             banner.classList.remove('hidden');
+            document.querySelectorAll('#app a[href="/dealer/add-vehicle.html"]').forEach(function (a) {
+              a.classList.add('hidden');
+            });
           }
 
           await loadDashboardData(token);

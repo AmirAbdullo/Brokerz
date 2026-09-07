@@ -952,14 +952,22 @@
         }
 
         function initSavedState() {
+          var tokenCandidate = null;
           try {
-            buyerToken = localStorage.getItem('carfox_token') || null;
-            if (!buyerToken) return;
+            tokenCandidate = localStorage.getItem('carfox_token') || null;
+            if (!tokenCandidate) return;
             var raw = localStorage.getItem('carfox_user');
-            if (!raw) { buyerToken = null; return; }
+            if (!raw) {
+              // Token but no cached user yet (e.g. right after OTP verification): resolve the role first.
+              if (window.CarfoxAuth) {
+                CarfoxAuth.validateBuyerSession().then(function (ok) { if (ok) initSavedState(); });
+              }
+              return;
+            }
             var u = JSON.parse(raw);
-            if (!u || u.role !== 'buyer') { buyerToken = null; return; }
-          } catch (_) { buyerToken = null; return; }
+            if (!u || u.role !== 'buyer') return;
+          } catch (_) { return; }
+          buyerToken = tokenCandidate;
           fetch('/api/saved-cars', { headers: { Authorization: 'Bearer ' + buyerToken } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {

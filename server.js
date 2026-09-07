@@ -437,6 +437,50 @@ async function sendVerificationEmail(user) {
   return code;
 }
 
+async function sendDealerDecisionEmail(dealershipId, decision, reason) {
+  const row = db
+    .prepare(
+      'SELECT d.business_name, u.email, u.full_name FROM dealerships d JOIN users u ON u.id = d.user_id WHERE d.id = ?'
+    )
+    .get(dealershipId);
+  if (!row || !row.email) return;
+  const appUrl = String(process.env.APP_URL || '').replace(new RegExp('/+$'), '');
+  const approved = decision === 'approved';
+  const subject = approved
+    ? 'Your CarFox dealer account is approved'
+    : 'Update on your CarFox dealer application';
+  const body = approved
+    ? '<p>Good news: <strong>' + escapeHtmlForEmail(row.business_name) + '</strong> has been approved. ' +
+      'You can now sign in and start listing vehicles.</p>' +
+      (appUrl
+        ? '<p><a href="' + appUrl + '/dealer/login.html" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">Sign in to your dashboard</a></p>'
+        : '')
+    : '<p>Unfortunately we could not approve <strong>' + escapeHtmlForEmail(row.business_name) + '</strong> at this time.</p>' +
+      (reason ? '<p><strong>Reason:</strong> ' + escapeHtmlForEmail(reason) + '</p>' : '') +
+      '<p>If you believe this is a mistake or can provide additional documentation, reply to this email.</p>';
+
+  await resend.emails.send({
+    from: 'CarFox <noreply@mawtiq.online>',
+    to: row.email,
+    subject: subject,
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px">' +
+      '<h2 style="color:#f97316">' + subject + '</h2>' +
+      '<p>Hi ' + escapeHtmlForEmail(row.full_name || 'there') + ',</p>' +
+      body +
+      '<p style="color:#999;font-size:13px">CarFox &middot; Verified dealers only</p>' +
+      '</div>'
+  });
+}
+
+function escapeHtmlForEmail(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
   const parts = header.split(' ');
@@ -507,7 +551,7 @@ app.post('/api/login', function (req, res) {
   }
 
   if (!row.email_verified) {
-    return res.status(403).json({ error: 'Please verify your email before logging in. Check your inbox for the verification link.' });
+    return res.status(403).json({ error: 'Please verify your email before logging in. Enter the 6-digit code we emailed you.' });
   }
 
   // Dealers need approved dealership; buyers and admins do not
@@ -632,7 +676,7 @@ app.post('/api/auth/dealer-signup', function (req, res) {
   );
   var selectUser = db.prepare('SELECT id, email, full_name, role, email_verified FROM users WHERE email = ?');
   var insertDealership = db.prepare(
-    "INSERT INTO dealerships (user_id, business_name, license_number, address, city, state, zip, phone, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
+    "INSERT INTO dealerships (user_id, business_name, license_number, address, city, state, zip, phone, status, governorate, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)"
   );
   var selectDealership = db.prepare(
     'SELECT id, user_id, business_name, license_number, address, city, state, zip, phone, status, created_at FROM dealerships WHERE user_id = ?'
@@ -656,6 +700,7 @@ app.post('/api/auth/dealer-signup', function (req, res) {
         '',           // state not used for Egypt
         '',           // zip not used
         phone,
+        governorate,
         createdAt
       );
     } catch (err) {
@@ -740,7 +785,12 @@ app.post('/api/auth/verify-otp', function (req, res) {
   db.prepare('UPDATE email_verification_tokens SET used = 1 WHERE id = ?').run(record.id);
 
   const token = signToken(user);
-  return res.json({ success: true, token, role: user.role });
+  return res.json({
+    success: true,
+    token,
+    role: user.role,
+    user: { id: user.id, email: user.email, full_name: user.full_name, role: user.role }
+  });
 });
 
 // Admin: list dealer applications (pending by default)
@@ -788,7 +838,10 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
       state: r.state,
       zip: r.zip,
       status: r.status,
+      approved_at: r.approved_at,
+      rejection_reason: r.rejection_reason,
       created_at: r.created_at,
+      user_created_at: r.user_created_at,
       user: {
         id: r.user_id,
         email: r.email,
@@ -811,6 +864,9 @@ app.patch('/api/admin/applications/:id/approve', requireAdmin, function (req, re
   db.prepare("UPDATE dealerships SET status='approved', approved_at = ?, approved_by = ? , rejection_reason = NULL WHERE id = ?")
     .run(new Date().toISOString(), req.user.id, id);
   var updated = db.prepare('SELECT * FROM dealerships WHERE id = ?').get(id);
+  sendDealerDecisionEmail(id, 'approved', null).catch(function (err) {
+    console.error('Failed to send approval email:', err);
+  });
   return res.json({ dealership: updated });
 });
 
@@ -826,6 +882,9 @@ app.patch('/api/admin/applications/:id/reject', requireAdmin, function (req, res
   }
   db.prepare("UPDATE dealerships SET status='rejected', rejection_reason = ? WHERE id = ?").run(reason, id);
   var updated = db.prepare('SELECT * FROM dealerships WHERE id = ?').get(id);
+  sendDealerDecisionEmail(id, 'rejected', reason).catch(function (err) {
+    console.error('Failed to send rejection email:', err);
+  });
   return res.json({ dealership: updated });
 });
 
@@ -2518,7 +2577,7 @@ wss.on('connection', function (ws, req) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     userId = decoded.sub;
-    const dealerRow = db.prepare('SELECT d.id FROM dealerships d WHERE d.user_id = ? AND d.status = ?').get(userId, 'active');
+    const dealerRow = db.prepare("SELECT d.id FROM dealerships d WHERE d.user_id = ? AND d.status = 'approved'").get(userId);
     if (dealerRow) {
       viewer = { role: 'dealer', userId: userId, dealershipId: dealerRow.id };
     } else {

@@ -216,7 +216,7 @@
       async function init() {
         const token = localStorage.getItem(TOKEN_KEY);
         if (!token) {
-          window.location.replace('/admin/login.html');
+          window.location.replace('/dealer/login.html');
           return;
         }
         try {
@@ -224,7 +224,7 @@
           if (me.status === 401) {
             localStorage.removeItem(TOKEN_KEY);
             localStorage.removeItem(USER_KEY);
-            window.location.replace('/admin/login.html');
+            window.location.replace('/dealer/login.html');
             return;
           }
           const meData = await me.json();
@@ -235,7 +235,7 @@
           document.getElementById('adminEmail').textContent = meData.user.email || 'admin';
           await fetchApps('pending');
         } catch (e) {
-          window.location.replace('/admin/login.html');
+          window.location.replace('/dealer/login.html');
           return;
         }
       }

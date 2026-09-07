@@ -319,6 +319,7 @@
             const data = await res.json().catch(() => ({}));
             if (res.ok && data.token) {
               localStorage.setItem('carfox_token', data.token);
+              if (data.user) localStorage.setItem('carfox_user', JSON.stringify(data.user));
               window.location.href = data.role === 'dealer' ? '/dealer/dashboard.html' : '/';
               return;
             }

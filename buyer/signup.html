@@ -285,6 +285,7 @@
             const data = await res.json().catch(function () { return {}; });
             if (res.ok && data.token) {
               localStorage.setItem(TOKEN_KEY, data.token);
+              if (data.user) localStorage.setItem(USER_KEY, JSON.stringify(data.user));
               window.location.href = data.role === 'dealer' ? '/dealer/dashboard.html' : postSignupRedirect();
               return;
             }

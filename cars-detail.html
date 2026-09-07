@@ -527,17 +527,25 @@
           }
         }
 
+        var detailSaveBound = false;
         function initDetailSave(vId) {
+          var tokenCandidate = null;
           try {
-            detailBuyerToken = localStorage.getItem(TOKEN_KEY) || null;
-            if (!detailBuyerToken) return;
-            var raw = localStorage.getItem(USER_KEY);
-            if (!raw) { detailBuyerToken = null; return; }
-            var u = JSON.parse(raw);
-            if (!u || u.role !== 'buyer') { detailBuyerToken = null; return; }
-          } catch (_) { detailBuyerToken = null; return; }
+            tokenCandidate = localStorage.getItem(TOKEN_KEY) || null;
+            var raw = tokenCandidate ? localStorage.getItem(USER_KEY) : null;
+            if (tokenCandidate && !raw) {
+              // Token but no cached user yet (e.g. right after OTP verification): resolve the role first.
+              if (window.CarfoxAuth) {
+                CarfoxAuth.validateBuyerSession().then(function (ok) { if (ok) initDetailSave(vId); });
+              }
+            } else if (tokenCandidate) {
+              var u = JSON.parse(raw);
+              if (u && u.role === 'buyer') detailBuyerToken = tokenCandidate;
+            }
+          } catch (_) { detailBuyerToken = null; }
 
-          fetch('/api/saved-cars', { headers: { Authorization: 'Bearer ' + detailBuyerToken } })
+          if (detailBuyerToken) {
+            fetch('/api/saved-cars', { headers: { Authorization: 'Bearer ' + detailBuyerToken } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {
               if (data && Array.isArray(data.saved)) {
@@ -546,7 +554,10 @@
               }
             })
             .catch(function () {});
+          }
 
+          if (detailSaveBound) return;
+          detailSaveBound = true;
           document.getElementById('detailSaveBtn').addEventListener('click', function () {
             if (!detailBuyerToken) {
               window.location.href = '/buyer/login.html?returnTo=' + encodeURIComponent(window.location.href);
