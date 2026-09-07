@@ -175,8 +175,12 @@ try {
 
 function hasDbColumn(table, column) {
   const rows = db.prepare('PRAGMA table_info(' + table + ');').all();
+  // SQLite column names are case-insensitive and Turso can report them in a different
+  // case than they were declared, so compare case-insensitively. Otherwise a column that
+  // already exists is "missing", ALTER TABLE fails with "duplicate column", and boot crashes.
+  const wanted = String(column).toLowerCase();
   return rows.some(function (r) {
-    return r.name === column;
+    return String(r.name).toLowerCase() === wanted;
   });
 }
 if (!hasDbColumn('vehicles', 'published_at')) {
@@ -199,13 +203,24 @@ if (!hasDbColumn('dealerships', 'governorate')) {
 if (!hasDbColumn('dealerships', 'whatsapp')) {
   db.exec('ALTER TABLE dealerships ADD COLUMN whatsapp TEXT;');
 }
+function addColumnIfMissing(table, column, definition) {
+  if (hasDbColumn(table, column)) return;
+  try {
+    db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + definition + ';');
+  } catch (err) {
+    if (/duplicate column/i.test(String(err && err.message))) {
+      console.warn('Column ' + table + '.' + column + ' already exists; skipping migration');
+      return;
+    }
+    throw err;
+  }
+}
+
 // Dealer membership (phase 1, no payments): plan name + how many listings it allows.
-if (!hasDbColumn('dealerships', 'plan')) {
-  db.exec("ALTER TABLE dealerships ADD COLUMN plan TEXT NOT NULL DEFAULT 'basic';");
-}
-if (!hasDbColumn('dealerships', 'listing_limit')) {
-  db.exec('ALTER TABLE dealerships ADD COLUMN listing_limit INTEGER NOT NULL DEFAULT 50;');
-}
+// Note: Turso stores this column as "PLAN" (it treats plan as a keyword), so every SELECT
+// below aliases it ("plan AS plan") to get a lowercase key back.
+addColumnIfMissing('dealerships', 'plan', "TEXT NOT NULL DEFAULT 'basic'");
+addColumnIfMissing('dealerships', 'listing_limit', 'INTEGER NOT NULL DEFAULT 50');
 
 const DEALER_PLANS = {
   basic: { label: 'Basic', listing_limit: 50 },
@@ -215,7 +230,7 @@ const DEALER_PLANS = {
 const LISTING_LIMIT_MESSAGE = "You've reached your plan's listing limit. Upgrade to add more.";
 
 function getDealerPlan(dealershipId) {
-  const row = db.prepare('SELECT plan, listing_limit FROM dealerships WHERE id = ?').get(dealershipId);
+  const row = db.prepare('SELECT plan AS plan, listing_limit FROM dealerships WHERE id = ?').get(dealershipId);
   const plan = row && row.plan ? String(row.plan) : 'basic';
   const limit = row && row.listing_limit != null ? Number(row.listing_limit) : DEALER_PLANS.basic.listing_limit;
   return { plan: plan, listing_limit: limit };
@@ -872,7 +887,7 @@ app.get('/api/admin/applications', requireAdmin, function (req, res) {
       d.approved_by,
       d.rejection_reason,
       d.created_at,
-      d.plan,
+      d.plan AS plan,
       d.listing_limit,
       u.id AS user_id,
       u.email,
@@ -973,7 +988,7 @@ app.patch('/api/admin/dealerships/:id/plan', requireAdmin, function (req, res) {
   var row = db.prepare('SELECT id FROM dealerships WHERE id = ?').get(id);
   if (!row) return res.status(404).json({ error: 'Not found' });
   db.prepare('UPDATE dealerships SET plan = ?, listing_limit = ? WHERE id = ?').run(plan, limit, id);
-  var updated = db.prepare('SELECT id, business_name, status, plan, listing_limit FROM dealerships WHERE id = ?').get(id);
+  var updated = db.prepare('SELECT id, business_name, status, plan AS plan, listing_limit FROM dealerships WHERE id = ?').get(id);
   return res.json({ dealership: updated });
 });
 
@@ -999,7 +1014,7 @@ app.get('/api/auth/me', function (req, res) {
   if (user.role === 'dealer') {
     const d = db
       .prepare(
-        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan, listing_limit FROM dealerships WHERE user_id = ?'
+        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan AS plan, listing_limit FROM dealerships WHERE user_id = ?'
       )
       .get(user.id);
     return res.json({
