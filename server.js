@@ -314,6 +314,17 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )
+`);
+
 function touchVehicleUpdatedAt(vehicleId) {
   db.prepare('UPDATE vehicles SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), vehicleId);
 }
@@ -461,6 +472,9 @@ function ensureMessagingTables() {
 }
 
 ensureMessagingTables();
+
+// When the dealer was last emailed about a conversation (anti-spam: at most one email per hour).
+addColumnIfMissing('conversations', 'dealer_notified_at', 'TEXT');
 
 // Buyer saved cars. Created here (not only in db/migrate-add-saved-cars.js) so a fresh
 // or production database gets the table without a manual migration step.
@@ -624,6 +638,149 @@ async function sendSuspensionEmail(opts) {
       '<p style="color:#999;font-size:13px">CarFox &middot; Verified dealers only</p>' +
       '</div>'
   });
+}
+
+function appBaseUrl() {
+  return String(process.env.APP_URL || '').replace(new RegExp('/+$'), '');
+}
+
+function emailShell(title, innerHtml) {
+  return (
+    '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px">' +
+    '<h2 style="color:#f97316">' + title + '</h2>' +
+    innerHtml +
+    '<p style="color:#999;font-size:13px">CarFox &middot; Verified dealers only</p>' +
+    '</div>'
+  );
+}
+
+async function sendPasswordResetEmail(user, code) {
+  await resend.emails.send({
+    from: 'CarFox <noreply@mawtiq.online>',
+    to: user.email,
+    subject: 'Your CarFox password reset code',
+    html: emailShell(
+      'Reset your password',
+      '<p>Hi ' + escapeHtmlForEmail(user.full_name || 'there') + ',</p>' +
+      '<p>Enter this code on the reset page to choose a new password:</p>' +
+      '<div style="font-size:42px;font-weight:bold;letter-spacing:12px;color:#0f1f3d;background:#f3f4f6;padding:24px;border-radius:12px;text-align:center;margin:16px 0">' + code + '</div>' +
+      '<p style="color:#999;font-size:13px">This code expires in 15 minutes and can be used once. If you did not ask to reset your password, you can ignore this email.</p>'
+    )
+  });
+}
+
+async function sendDealerMessageEmail(opts) {
+  const base = appBaseUrl();
+  const link = base ? base + '/dealer/chat.html?conversation=' + opts.conversationId : '';
+  const subject = 'New message from ' + opts.buyerFirstName + (opts.carTitle ? ' about your ' + opts.carTitle : '');
+  await resend.emails.send({
+    from: 'CarFox <noreply@mawtiq.online>',
+    to: opts.email,
+    subject: subject,
+    html: emailShell(
+      escapeHtmlForEmail(subject),
+      '<p>Hi ' + escapeHtmlForEmail(opts.dealerName || 'there') + ',</p>' +
+      '<p><strong>' + escapeHtmlForEmail(opts.buyerFirstName) + '</strong> sent you a message' +
+      (opts.carTitle ? ' about your <strong>' + escapeHtmlForEmail(opts.carTitle) + '</strong>' : '') + ':</p>' +
+      (opts.preview ? '<blockquote style="margin:12px 0;padding:12px 16px;background:#f3f4f6;border-left:4px solid #1d4ed8;border-radius:8px;color:#111">' + escapeHtmlForEmail(opts.preview) + '</blockquote>' : '') +
+      (link ? '<p><a href="' + link + '" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">Open conversation</a></p>' : '') +
+      '<p style="color:#999;font-size:13px">You will get at most one email per conversation per hour.</p>'
+    )
+  });
+}
+
+async function sendDealerInquiryEmail(opts) {
+  const base = appBaseUrl();
+  const link = base ? base + '/dealer/inquiries.html' : '';
+  const subject = 'New inquiry from ' + opts.buyerFirstName + (opts.carTitle ? ' about your ' + opts.carTitle : '');
+  await resend.emails.send({
+    from: 'CarFox <noreply@mawtiq.online>',
+    to: opts.email,
+    subject: subject,
+    html: emailShell(
+      escapeHtmlForEmail(subject),
+      '<p>Hi ' + escapeHtmlForEmail(opts.dealerName || 'there') + ',</p>' +
+      '<p><strong>' + escapeHtmlForEmail(opts.buyerFirstName) + '</strong> sent an inquiry' +
+      (opts.carTitle ? ' about your <strong>' + escapeHtmlForEmail(opts.carTitle) + '</strong>' : '') + ':</p>' +
+      '<blockquote style="margin:12px 0;padding:12px 16px;background:#f3f4f6;border-left:4px solid #1d4ed8;border-radius:8px;color:#111">' + escapeHtmlForEmail(opts.preview) + '</blockquote>' +
+      (opts.buyerPhone ? '<p>Phone: ' + escapeHtmlForEmail(opts.buyerPhone) + '</p>' : '') +
+      (link ? '<p><a href="' + link + '" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">View inquiries</a></p>' : '')
+    )
+  });
+}
+
+const DEALER_NOTIFY_WINDOW_MS = 60 * 60 * 1000;
+
+function firstNameOf(user) {
+  const full = user && (user.full_name || user.fullName) ? String(user.full_name || user.fullName).trim() : '';
+  return full ? full.split(/\s+/)[0] : 'a buyer';
+}
+
+function carTitleFor(vehicleId) {
+  if (!vehicleId) return '';
+  const v = db.prepare('SELECT year, make, model FROM vehicles WHERE id = ?').get(vehicleId);
+  return v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : '';
+}
+
+// Email the dealer about a buyer's message, at most once per conversation per hour.
+function notifyDealerOfNewMessage(conversation, message, buyer) {
+  try {
+    const now = Date.now();
+    const row = db.prepare('SELECT dealer_notified_at FROM conversations WHERE id = ?').get(conversation.id);
+    const last = row && row.dealer_notified_at ? Date.parse(row.dealer_notified_at) : 0;
+    if (last && now - last < DEALER_NOTIFY_WINDOW_MS) {
+      console.log('Dealer email skipped for conversation ' + conversation.id + ' (last sent ' + Math.round((now - last) / 60000) + ' min ago)');
+      return;
+    }
+    const dealer = db
+      .prepare('SELECT d.id, d.business_name, d.suspended, u.email, u.full_name FROM dealerships d JOIN users u ON u.id = d.user_id WHERE d.id = ?')
+      .get(conversation.dealership_id);
+    if (!dealer || !dealer.email || dealer.suspended) return;
+    db.prepare('UPDATE conversations SET dealer_notified_at = ? WHERE id = ?').run(new Date(now).toISOString(), conversation.id);
+    const preview = message && message.body ? String(message.body).slice(0, 300) : (message && message.has_attachments ? '[Attachment]' : '');
+    sendDealerMessageEmail({
+      email: dealer.email,
+      dealerName: dealer.full_name,
+      buyerFirstName: firstNameOf(buyer),
+      carTitle: carTitleFor(conversation.vehicle_id),
+      preview: preview,
+      conversationId: conversation.id
+    })
+      .then(function () { console.log('Dealer email sent to ' + dealer.email + ' for conversation ' + conversation.id); })
+      .catch(function (err) { console.error('Dealer message email failed:', err); });
+  } catch (err) {
+    console.error('notifyDealerOfNewMessage failed:', err);
+  }
+}
+
+// Email the dealer about an inquiry, at most once per buyer per dealership per hour.
+function notifyDealerOfInquiry(dealershipId, vehicleId, buyer, messageText, buyerPhone, createdAt) {
+  try {
+    const since = new Date(Date.now() - DEALER_NOTIFY_WINDOW_MS).toISOString();
+    const prior = db
+      .prepare('SELECT COUNT(*) AS c FROM inquiries WHERE dealership_id = ? AND LOWER(buyer_email) = ? AND created_at >= ? AND created_at < ?')
+      .get(dealershipId, String(buyer.email || '').toLowerCase(), since, createdAt).c;
+    if (prior > 0) {
+      console.log('Dealer inquiry email skipped for dealership ' + dealershipId + ' (' + prior + ' inquiry from same buyer in the last hour)');
+      return;
+    }
+    const dealer = db
+      .prepare('SELECT d.id, d.business_name, d.suspended, u.email, u.full_name FROM dealerships d JOIN users u ON u.id = d.user_id WHERE d.id = ?')
+      .get(dealershipId);
+    if (!dealer || !dealer.email || dealer.suspended) return;
+    sendDealerInquiryEmail({
+      email: dealer.email,
+      dealerName: dealer.full_name,
+      buyerFirstName: firstNameOf(buyer),
+      carTitle: carTitleFor(vehicleId),
+      preview: String(messageText || '').slice(0, 500),
+      buyerPhone: buyerPhone || ''
+    })
+      .then(function () { console.log('Dealer inquiry email sent to ' + dealer.email + ' for vehicle ' + vehicleId); })
+      .catch(function (err) { console.error('Dealer inquiry email failed:', err); });
+  } catch (err) {
+    console.error('notifyDealerOfInquiry failed:', err);
+  }
 }
 
 function escapeHtmlForEmail(str) {
@@ -944,6 +1101,52 @@ app.post('/api/auth/verify-otp', function (req, res) {
     role: user.role,
     user: { id: user.id, email: user.email, full_name: user.full_name, role: user.role }
   });
+});
+
+// Forgot password: always answers the same way so email addresses cannot be enumerated.
+const forgotPasswordAttempts = new Map(); // email -> [timestamps]
+app.post('/api/auth/forgot-password', function (req, res) {
+  const email = normalizeEmail(req.body && req.body.email);
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+  const generic = { message: 'If an account exists for that email, a reset code has been sent.' };
+
+  // Light rate limit: 3 codes per email per 15 minutes (still answers generically).
+  const now = Date.now();
+  const recent = (forgotPasswordAttempts.get(email) || []).filter(function (t) { return now - t < 15 * 60 * 1000; });
+  if (recent.length >= 3) return res.json(generic);
+  recent.push(now);
+  forgotPasswordAttempts.set(email, recent);
+
+  const user = db.prepare('SELECT id, email, full_name FROM users WHERE email = ?').get(email);
+  if (!user) return res.json(generic);
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(now + 15 * 60 * 1000).toISOString();
+  db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0').run(user.id);
+  db.prepare('INSERT INTO password_reset_tokens (user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .run(user.id, code, expiresAt, new Date(now).toISOString());
+  sendPasswordResetEmail(user, code).catch(function (err) { console.error('Failed to send password reset email:', err); });
+  return res.json(generic);
+});
+
+app.post('/api/auth/reset-password', function (req, res) {
+  const email = normalizeEmail(req.body && req.body.email);
+  const code = String((req.body && req.body.code) || '').trim();
+  const password = String((req.body && req.body.password) || '');
+  if (!email || !code) return res.status(400).json({ error: 'Email and code are required.' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+
+  const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+  if (!user) return res.status(400).json({ error: 'Invalid or expired code.' });
+  const record = db
+    .prepare('SELECT id, expires_at FROM password_reset_tokens WHERE user_id = ? AND token = ? AND used = 0 ORDER BY id DESC LIMIT 1')
+    .get(user.id, code);
+  if (!record) return res.status(400).json({ error: 'Invalid or expired code.' });
+  if (new Date(record.expires_at) < new Date()) return res.status(400).json({ error: 'Invalid or expired code.' });
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), user.id);
+  db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE user_id = ?').run(user.id);
+  return res.json({ success: true });
 });
 
 // Admin: list dealer applications (pending by default)
@@ -2005,6 +2208,7 @@ app.post('/api/inquiries', requireBuyer, buyerSuspendedGuard, function (req, res
       createdAt
     );
 
+  notifyDealerOfInquiry(vehicle.dealership_id, vehicleId, req.user, message, buyerPhone, createdAt);
   return res.status(201).json({ id: info.lastInsertRowid });
 });
 
@@ -2322,6 +2526,7 @@ app.post('/api/conversations/:id/messages', requireMessagingAuth, messagingSuspe
       attachments: normalizedAttachments
     });
     wsBroadcastMessage(conversationId, message, req.user.id);
+    if (req.messagingRole === 'buyer') notifyDealerOfNewMessage(conversation, message, req.user);
     return res.status(201).json(message);
   } catch (err) {
     console.error(err);
