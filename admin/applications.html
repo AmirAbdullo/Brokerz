@@ -32,7 +32,11 @@
           <a href="/" class="text-lg font-extrabold tracking-tight">
             <span class="text-blue-700">Car</span><span class="text-orange-500">Fox</span>
           </a>
-          <span class="text-sm text-gray-500">Admin</span>
+          <span class="text-sm text-gray-500 hidden sm:inline">Admin</span>
+          <nav class="flex items-center gap-1 text-sm font-semibold">
+            <a href="/admin/applications.html" class="rounded-lg px-3 py-1.5 bg-blue-50 text-blue-700" aria-current="page">Applications</a>
+            <a href="/admin/dealers.html" class="rounded-lg px-3 py-1.5 text-gray-600 hover:bg-gray-100 hover:text-gray-900">Dealers</a>
+          </nav>
         </div>
         <div class="flex items-center gap-3 text-sm">
           <span id="adminEmail" class="text-gray-700">—</span>
@@ -54,22 +58,12 @@
         <button data-status="pending" class="tab-btn rounded-full px-4 py-2 text-sm font-semibold bg-blue-700 text-white">Pending</button>
         <button data-status="approved" class="tab-btn rounded-full px-4 py-2 text-sm font-semibold bg-gray-100 text-gray-700">Approved</button>
         <button data-status="rejected" class="tab-btn rounded-full px-4 py-2 text-sm font-semibold bg-gray-100 text-gray-700">Rejected</button>
-        <button data-status="suspended" class="tab-btn rounded-full px-4 py-2 text-sm font-semibold bg-gray-100 text-gray-700">Suspended</button>
         <button data-status="all" class="tab-btn rounded-full px-4 py-2 text-sm font-semibold bg-gray-100 text-gray-700">All</button>
       </div>
     </div>
 
     <!-- List -->
     <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-10">
-      <section id="buyerTools" class="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
-        <h2 class="text-sm font-semibold text-gray-900">Buyers</h2>
-        <p class="mt-0.5 text-xs text-gray-500">Search a buyer by email to suspend or unsuspend them. Suspended buyers are also listed under the Suspended tab.</p>
-        <form id="buyerSearchForm" class="mt-2 flex gap-2">
-          <input id="buyerSearchInput" type="search" placeholder="buyer@example.com" class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-          <button class="rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold px-4 py-2 text-sm" type="submit">Search</button>
-        </form>
-        <div id="buyerResults" class="mt-3 space-y-2"></div>
-      </section>
       <div id="list"></div>
       <div id="empty" class="hidden rounded-lg border border-gray-200 bg-gray-50 p-8 text-center text-gray-600">
         No applications in this category.
@@ -90,26 +84,11 @@
       </div>
     </div>
 
-    <!-- Suspend modal -->
-    <div id="suspendModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/40" data-close-suspend></div>
-      <div class="relative bg-white rounded-xl border border-gray-200 w-[92%] max-w-md p-5">
-        <h2 class="text-lg font-semibold text-gray-900">Suspend account</h2>
-        <p id="suspendModalTitle" class="mt-1 text-sm text-gray-600"></p>
-        <textarea id="suspendReason" rows="3" class="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Reason (shown to the account holder and emailed to them)"></textarea>
-        <div class="mt-4 flex gap-2 justify-end">
-          <button class="px-4 py-2 rounded-lg border border-gray-300 text-gray-700" data-close-suspend>Cancel</button>
-          <button id="confirmSuspend" class="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700">Suspend</button>
-        </div>
-      </div>
-    </div>
-
     <script>
       const TOKEN_KEY = 'carfox_token';
       const USER_KEY = 'carfox_user';
       let currentStatus = 'pending';
       let rejectTarget = null;
-      let suspendTarget = null;
 
       function setToast(kind, message) {
         const host = document.getElementById('toast');
@@ -216,216 +195,17 @@
             d.textContent = 'Rejected' + (a.rejection_reason ? (': ' + a.rejection_reason) : '');
             actions.appendChild(d);
           }
-          const suspendControls = buildDealerSuspendControls(a);
-          if (suspendControls) actions.appendChild(suspendControls);
-          card.appendChild(buildPlanEditor(a));
+          if (a.status === 'approved') {
+            const manage = document.createElement('a');
+            manage.href = '/admin/dealers.html?q=' + encodeURIComponent(a.user?.email || a.business_name || '');
+            manage.className = 'mt-2 inline-block text-sm font-semibold text-blue-700 hover:underline';
+            manage.textContent = 'Manage plan & status →';
+            actions.appendChild(manage);
+          }
           list.appendChild(card);
         }
       }
 
-      const PLAN_LIMITS = { basic: 50, pro: 100 };
-
-      function planLabel(plan, limit) {
-        const name = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : 'Basic';
-        return name + ' · ' + limit + ' listings';
-      }
-
-      function buildPlanEditor(a) {
-        const wrap = document.createElement('div');
-        wrap.className = 'mt-3 pt-3 border-t border-gray-100 flex flex-wrap items-center gap-2 text-sm';
-        wrap.innerHTML = `
-          <span class="text-gray-600">Plan:</span>
-          <select data-plan class="rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
-            <option value="basic">Basic (50)</option>
-            <option value="pro">Pro (100)</option>
-            <option value="custom">Custom…</option>
-          </select>
-          <input data-limit type="number" min="0" max="100000" step="1" class="hidden w-24 rounded-lg border border-gray-300 px-2 py-1.5 text-sm" placeholder="limit" />
-          <button data-save class="inline-flex items-center justify-center rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold px-3 py-1.5 text-sm">Save</button>
-          <span data-current class="text-xs text-gray-500"></span>
-        `;
-        const select = wrap.querySelector('[data-plan]');
-        const limitInput = wrap.querySelector('[data-limit]');
-        const saveBtn = wrap.querySelector('[data-save]');
-        const current = wrap.querySelector('[data-current]');
-
-        let plan = (a.plan || 'basic').toLowerCase();
-        let limit = a.listing_limit != null ? Number(a.listing_limit) : 50;
-        if (!PLAN_LIMITS[plan] && plan !== 'custom') plan = 'custom';
-        select.value = plan;
-        limitInput.value = String(limit);
-        limitInput.classList.toggle('hidden', plan !== 'custom');
-        current.textContent = 'Current: ' + planLabel(plan, limit);
-
-        select.addEventListener('change', () => {
-          limitInput.classList.toggle('hidden', select.value !== 'custom');
-          if (select.value !== 'custom') limitInput.value = String(PLAN_LIMITS[select.value]);
-        });
-
-        saveBtn.addEventListener('click', async () => {
-          const payload = { plan: select.value };
-          if (select.value === 'custom') payload.listing_limit = Number(limitInput.value);
-          saveBtn.disabled = true;
-          try {
-            const res = await fetch('/api/admin/dealerships/' + a.dealership_id + '/plan', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem(TOKEN_KEY) },
-              body: JSON.stringify(payload)
-            });
-            const body = await res.json().catch(() => ({}));
-            if (res.ok && body.dealership) {
-              plan = body.dealership.plan;
-              limit = body.dealership.listing_limit;
-              a.plan = plan; a.listing_limit = limit;
-              current.textContent = 'Current: ' + planLabel(plan, limit);
-              setToast('ok', 'Plan updated: ' + planLabel(plan, limit));
-            } else {
-              setToast('error', body && body.error ? body.error : 'Failed to update plan');
-            }
-          } catch (_) {
-            setToast('error', 'Failed to update plan');
-          } finally {
-            saveBtn.disabled = false;
-          }
-        });
-        return wrap;
-      }
-
-      // ---------- Suspension (dealers + buyers) ----------
-      function authHeaders() {
-        return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem(TOKEN_KEY) };
-      }
-
-      function fmtWhen(iso) {
-        return iso ? new Date(iso).toLocaleString() : '—';
-      }
-
-      function openSuspendModal(target) {
-        suspendTarget = target;
-        document.getElementById('suspendModalTitle').textContent = 'Suspend ' + target.label + '? They keep read access but cannot ' +
-          (target.type === 'dealer' ? 'list or message, and their listings are hidden.' : 'message dealers or send inquiries.');
-        document.getElementById('suspendReason').value = '';
-        document.getElementById('suspendModal').classList.remove('hidden');
-      }
-      function closeSuspendModal() {
-        document.getElementById('suspendModal').classList.add('hidden');
-        suspendTarget = null;
-      }
-      document.addEventListener('click', (e) => {
-        if (e.target && e.target.hasAttribute('data-close-suspend')) closeSuspendModal();
-      });
-      document.getElementById('confirmSuspend').addEventListener('click', async () => {
-        if (!suspendTarget) return;
-        const t = suspendTarget;
-        const reason = document.getElementById('suspendReason').value.trim();
-        const url = t.type === 'dealer'
-          ? '/api/admin/dealerships/' + t.id + '/suspend'
-          : '/api/admin/users/' + t.id + '/suspend';
-        try {
-          const res = await fetch(url, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ reason }) });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            setToast('ok', 'Suspended ' + t.label);
-            closeSuspendModal();
-            t.onDone && t.onDone(body);
-          } else {
-            setToast('error', body && body.error ? body.error : 'Failed to suspend');
-          }
-        } catch (_) {
-          setToast('error', 'Failed to suspend');
-        }
-      });
-
-      async function unsuspend(type, id, label, onDone) {
-        const url = type === 'dealer'
-          ? '/api/admin/dealerships/' + id + '/unsuspend'
-          : '/api/admin/users/' + id + '/unsuspend';
-        try {
-          const res = await fetch(url, { method: 'PATCH', headers: authHeaders() });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            setToast('ok', 'Unsuspended ' + label);
-            onDone && onDone(body);
-          } else {
-            setToast('error', body && body.error ? body.error : 'Failed to unsuspend');
-          }
-        } catch (_) {
-          setToast('error', 'Failed to unsuspend');
-        }
-      }
-
-      function buildDealerSuspendControls(a) {
-        const label = a.business_name || 'this dealership';
-        const wrap = document.createElement('div');
-        wrap.className = 'mt-2 flex flex-wrap items-center gap-2';
-        if (a.suspended) {
-          const info = document.createElement('span');
-          info.className = 'text-sm text-red-700';
-          info.textContent = 'Suspended ' + fmtWhen(a.suspended_at) + (a.suspension_reason ? ' · ' + a.suspension_reason : '');
-          const btn = document.createElement('button');
-          btn.className = 'inline-flex items-center justify-center rounded-lg border border-green-600 text-green-700 hover:bg-green-50 font-semibold px-4 py-2 text-sm';
-          btn.textContent = 'Unsuspend';
-          btn.addEventListener('click', () => unsuspend('dealer', a.dealership_id, label, () => fetchApps(currentStatus)));
-          wrap.appendChild(info);
-          wrap.appendChild(btn);
-          return wrap;
-        }
-        if (a.status !== 'approved') return null;
-        const btn = document.createElement('button');
-        btn.className = 'inline-flex items-center justify-center rounded-lg border border-red-600 text-red-600 hover:bg-red-50 font-semibold px-4 py-2 text-sm';
-        btn.textContent = 'Suspend';
-        btn.addEventListener('click', () => openSuspendModal({ type: 'dealer', id: a.dealership_id, label, onDone: () => fetchApps(currentStatus) }));
-        wrap.appendChild(btn);
-        return wrap;
-      }
-
-      function renderBuyerCard(u) {
-        const card = document.createElement('div');
-        card.className = 'bg-white border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2';
-        const info = document.createElement('div');
-        info.className = 'min-w-0 text-sm';
-        info.innerHTML = '<div class="font-semibold text-gray-900">' + (u.full_name || '—') + ' <span class="font-normal text-gray-600">· ' + u.email + '</span></div>' +
-          '<div class="text-xs text-gray-500">Buyer · joined ' + fmtAgo(u.created_at) +
-          (u.suspended ? ' · <span class="text-red-700 font-semibold">suspended ' + fmtWhen(u.suspended_at) + (u.suspension_reason ? ' · ' + u.suspension_reason : '') + '</span>' : '') + '</div>';
-        const btn = document.createElement('button');
-        if (u.suspended) {
-          btn.className = 'rounded-lg border border-green-600 text-green-700 hover:bg-green-50 font-semibold px-3 py-1.5 text-sm';
-          btn.textContent = 'Unsuspend';
-          btn.addEventListener('click', () => unsuspend('buyer', u.id, u.email, (body) => { Object.assign(u, body.user || {}); card.replaceWith(renderBuyerCard(u)); }));
-        } else {
-          btn.className = 'rounded-lg border border-red-600 text-red-600 hover:bg-red-50 font-semibold px-3 py-1.5 text-sm';
-          btn.textContent = 'Suspend';
-          btn.addEventListener('click', () => openSuspendModal({ type: 'buyer', id: u.id, label: u.email, onDone: (body) => { Object.assign(u, body.user || {}); card.replaceWith(renderBuyerCard(u)); } }));
-        }
-        card.appendChild(info);
-        card.appendChild(btn);
-        return card;
-      }
-
-      async function loadBuyers(query) {
-        const host = document.getElementById('buyerResults');
-        host.innerHTML = '<div class="text-sm text-gray-500">Loading…</div>';
-        try {
-          const res = await fetch('/api/admin/users?' + query, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem(TOKEN_KEY) } });
-          const data = await res.json();
-          host.innerHTML = '';
-          const users = data.users || [];
-          if (!users.length) {
-            host.innerHTML = '<div class="text-sm text-gray-500">No buyers found.</div>';
-            return;
-          }
-          users.forEach((u) => host.appendChild(renderBuyerCard(u)));
-        } catch (_) {
-          host.innerHTML = '<div class="text-sm text-red-600">Could not load buyers.</div>';
-        }
-      }
-
-      document.getElementById('buyerSearchForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const q = document.getElementById('buyerSearchInput').value.trim();
-        if (!q) return;
-        loadBuyers('email=' + encodeURIComponent(q));
-      });
 
       async function fetchApps(status) {
         currentStatus = status;
@@ -443,12 +223,6 @@
         }
         const data = await res.json();
         renderList(data.applications || []);
-        if (status === 'suspended') {
-          document.getElementById('subtext').textContent = (data.applications || []).length + ' suspended dealership(s); suspended buyers are listed above';
-          loadBuyers('suspended=1');
-        } else {
-          document.getElementById('buyerResults').innerHTML = '';
-        }
       }
 
       async function init() {

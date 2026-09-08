@@ -1340,6 +1340,47 @@ app.patch('/api/admin/users/:id/unsuspend', requireAdmin, function (req, res) {
   return setBuyerSuspended(req, res, false);
 });
 
+// Admin: management list of approved dealerships (plan usage, views, suspension)
+app.get('/api/admin/dealers', requireAdmin, function (req, res) {
+  var rows = db
+    .prepare(
+      `SELECT
+         d.id, d.business_name, d.phone, d.city, d.governorate, d.created_at,
+         d.plan AS plan, d.listing_limit, d.suspended, d.suspension_reason, d.suspended_at,
+         u.id AS user_id, u.email AS owner_email, u.full_name AS owner_name,
+         (SELECT COUNT(*) FROM vehicles v WHERE v.dealership_id = d.id AND v.status IN ('active', 'paused', 'sold')) AS listings_used,
+         (SELECT COUNT(*) FROM vehicles v WHERE v.dealership_id = d.id AND v.status = 'active') AS active_listings,
+         (SELECT COALESCE(SUM(v.views), 0) FROM vehicles v WHERE v.dealership_id = d.id) AS total_views
+       FROM dealerships d
+       JOIN users u ON u.id = d.user_id
+       WHERE d.status = 'approved'
+       ORDER BY d.business_name COLLATE NOCASE ASC`
+    )
+    .all();
+  return res.json({
+    dealers: rows.map(function (r) {
+      return {
+        id: r.id,
+        user_id: r.user_id,
+        business_name: r.business_name,
+        owner_email: r.owner_email,
+        owner_name: r.owner_name,
+        phone: r.phone,
+        governorate: r.governorate || r.city || null,
+        created_at: r.created_at,
+        plan: r.plan || 'basic',
+        listing_limit: r.listing_limit != null ? r.listing_limit : DEALER_PLANS.basic.listing_limit,
+        listings_used: r.listings_used,
+        active_listings: r.active_listings,
+        total_views: r.total_views,
+        suspended: !!r.suspended,
+        suspension_reason: r.suspension_reason || null,
+        suspended_at: r.suspended_at || null
+      };
+    })
+  });
+});
+
 // Admin: set a dealership's membership plan and listing limit
 app.patch('/api/admin/dealerships/:id/plan', requireAdmin, function (req, res) {
   var id = Number(req.params.id);
@@ -2481,6 +2522,12 @@ app.post('/api/conversations/:id/messages', requireMessagingAuth, messagingSuspe
   const viewer = messagingViewerContext(req);
   if (!viewer || !conversationsLib.isParticipant(conversation, viewer)) {
     return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (req.messagingRole === 'buyer') {
+    const dealerRow = db.prepare('SELECT suspended FROM dealerships WHERE id = ?').get(conversation.dealership_id);
+    if (dealerRow && dealerRow.suspended) {
+      return res.status(403).json({ error: 'This dealer is currently unavailable. Messages cannot be sent right now.', code: 'DEALER_SUSPENDED' });
+    }
   }
 
   const body = req.body || {};
