@@ -229,6 +229,11 @@ addColumnIfMissing('dealerships', 'listing_limit', 'INTEGER NOT NULL DEFAULT 50'
 addColumnIfMissing('dealerships', 'suspended', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('dealerships', 'suspension_reason', 'TEXT');
 addColumnIfMissing('dealerships', 'suspended_at', 'TEXT');
+// Dealer profile extras: logo (R2), website, and a map pin.
+addColumnIfMissing('dealerships', 'logo_url', 'TEXT');
+addColumnIfMissing('dealerships', 'website', 'TEXT');
+addColumnIfMissing('dealerships', 'lat', 'REAL');
+addColumnIfMissing('dealerships', 'lng', 'REAL');
 
 function suspendedError(reason) {
   const r = reason ? String(reason).trim() : '';
@@ -1427,7 +1432,7 @@ app.get('/api/auth/me', function (req, res) {
   if (user.role === 'dealer') {
     const d = db
       .prepare(
-        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan AS plan, listing_limit, suspended, suspension_reason, suspended_at FROM dealerships WHERE user_id = ?'
+        'SELECT id, business_name, status, phone, address, city, governorate, whatsapp, plan AS plan, listing_limit, suspended, suspension_reason, suspended_at, logo_url, website, lat, lng FROM dealerships WHERE user_id = ?'
       )
       .get(user.id);
     return res.json({
@@ -1454,7 +1459,11 @@ app.get('/api/auth/me', function (req, res) {
             listing_limit: d.listing_limit != null ? d.listing_limit : DEALER_PLANS.basic.listing_limit,
             suspended: !!d.suspended,
             suspension_reason: d.suspension_reason || null,
-            suspended_at: d.suspended_at || null
+            suspended_at: d.suspended_at || null,
+            logo_url: d.logo_url || null,
+            website: d.website || null,
+            lat: d.lat != null ? d.lat : null,
+            lng: d.lng != null ? d.lng : null
           }
         : null
     });
@@ -1510,12 +1519,45 @@ app.patch('/api/dealer/profile', function (req, res) {
     params.push(governorate || null);
   }
 
+  if (body.website !== undefined) {
+    const raw = body.website == null ? '' : String(body.website).trim();
+    let website = null;
+    if (raw) {
+      const candidate = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+      try {
+        const u = new URL(candidate);
+        if (!/^https?:$/.test(u.protocol) || u.hostname.indexOf('.') === -1) throw new Error('bad');
+        website = u.toString();
+      } catch (_) {
+        return res.status(400).json({ error: 'Website must be a valid URL, e.g. https://example.com' });
+      }
+    }
+    updates.push('website = ?');
+    params.push(website);
+  }
+  if (body.lat !== undefined || body.lng !== undefined) {
+    if (body.lat == null || body.lat === '' || body.lng == null || body.lng === '') {
+      updates.push('lat = NULL');
+      updates.push('lng = NULL');
+    } else {
+      const lat = Number(body.lat);
+      const lng = Number(body.lng);
+      if (!isFinite(lat) || !isFinite(lng) || lat < 21 || lat > 32.5 || lng < 24 || lng > 37) {
+        return res.status(400).json({ error: 'Location must be inside Egypt' });
+      }
+      updates.push('lat = ?');
+      params.push(Math.round(lat * 1e6) / 1e6);
+      updates.push('lng = ?');
+      params.push(Math.round(lng * 1e6) / 1e6);
+    }
+  }
+
   if (!updates.length) return res.status(400).json({ error: 'Nothing to update' });
 
   params.push(dealership.id);
   db.prepare('UPDATE dealerships SET ' + updates.join(', ') + ' WHERE id = ?').run(...params);
   const updated = db
-    .prepare('SELECT business_name, phone, address, city, whatsapp FROM dealerships WHERE id = ?')
+    .prepare('SELECT business_name, phone, address, city, governorate, whatsapp, website, lat, lng, logo_url FROM dealerships WHERE id = ?')
     .get(dealership.id);
   return res.json({ dealership: updated });
 });
@@ -1593,6 +1635,50 @@ app.post('/api/user/avatar', function (req, res, next) {
   db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarUrl, user.id);
 
   return res.json({ avatar_url: avatarUrl });
+});
+
+// Upload / replace the dealership logo (stored in R2 like avatars)
+app.post('/api/dealer/logo', function (req, res, next) {
+  photoUpload.single('logo')(req, res, function (err) {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'Logo must be 10 MB or smaller' });
+      return res.status(400).json({ error: err.message || 'Upload error' });
+    }
+    next();
+  });
+}, requireDealer, async function (req, res) {
+  if (!req.file) return res.status(400).json({ error: 'No logo provided' });
+  if (!r2Configured()) return res.status(503).json({ error: 'File storage not configured' });
+
+  const current = db.prepare('SELECT logo_url FROM dealerships WHERE id = ?').get(req.dealership.id);
+  if (current && current.logo_url) {
+    const oldKey = publicUrlToKey(current.logo_url);
+    if (oldKey) {
+      try { await r2.send(new DeleteObjectCommand({ Bucket: r2Bucket, Key: oldKey })); } catch (_) { /* ignore */ }
+    }
+  }
+
+  let pngBuffer;
+  try {
+    pngBuffer = await sharp(req.file.buffer)
+      .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+  } catch (e) {
+    return res.status(400).json({ error: 'Could not process image' });
+  }
+
+  const key = 'dealer-logos/' + req.dealership.id + '/' + Date.now() + '.png';
+  const publicBase = String(r2PublicUrl).replace(/\/$/, '');
+  try {
+    await r2.send(new PutObjectCommand({ Bucket: r2Bucket, Key: key, Body: pngBuffer, ContentType: 'image/png' }));
+  } catch (e) {
+    console.error('R2 PutObject failed for dealer logo:', e.message);
+    return res.status(500).json({ error: 'Upload failed' });
+  }
+  const logoUrl = publicBase + '/' + key;
+  db.prepare('UPDATE dealerships SET logo_url = ? WHERE id = ?').run(logoUrl, req.dealership.id);
+  return res.json({ logo_url: logoUrl });
 });
 
 // Short admin URL -> admin panel
@@ -1893,7 +1979,8 @@ app.get('/api/dealers/:id/profile', function (req, res) {
 
   const dealer = db
     .prepare(
-      `SELECT d.id, d.business_name, d.city, d.state, d.phone, d.created_at,
+      `SELECT d.id, d.business_name, d.city, d.state, d.governorate, d.phone, d.whatsapp,
+              d.logo_url, d.website, d.lat, d.lng, d.created_at,
               COUNT(v.id) AS total_listings
        FROM dealerships d
        LEFT JOIN vehicles v ON v.dealership_id = d.id AND v.status = 'active'
@@ -1936,9 +2023,16 @@ app.get('/api/dealers/:id/profile', function (req, res) {
       business_name: dealer.business_name,
       city: dealer.city,
       state: dealer.state,
+      governorate: dealer.governorate || dealer.city || null,
       phone: dealer.phone,
+      whatsapp: dealer.whatsapp || null,
+      logo_url: dealer.logo_url || null,
+      website: dealer.website || null,
+      lat: dealer.lat != null ? dealer.lat : null,
+      lng: dealer.lng != null ? dealer.lng : null,
       total_listings: dealer.total_listings,
-      member_since: memberSince
+      member_since: memberSince,
+      created_at: dealer.created_at
     },
     vehicles: vehicleRows.map(mapPublicCarRow)
   });
@@ -2133,7 +2227,9 @@ function mapPublicVehicleDetail(row, photoRows) {
       city: row.dealer_city,
       state: row.dealer_state,
       phone: row.dealer_phone,
-      whatsapp: row.dealer_whatsapp || null
+      whatsapp: row.dealer_whatsapp || null,
+      governorate: row.dealer_governorate || row.dealer_city || null,
+      logo_url: row.dealer_logo_url || null
     }
   };
 }
@@ -2152,7 +2248,7 @@ app.get('/api/cars/:id', function (req, res) {
         v.description, v.vin, v.status, v.published_at, COALESCE(v.views, 0) AS views,
         d.id AS dealer_id, d.business_name AS dealer_business_name,
         d.city AS dealer_city, d.state AS dealer_state, d.phone AS dealer_phone,
-        d.whatsapp AS dealer_whatsapp
+        d.whatsapp AS dealer_whatsapp, d.governorate AS dealer_governorate, d.logo_url AS dealer_logo_url
       ${PUBLIC_CARS_FROM_SQL}
       WHERE v.id = ? AND d.status = 'approved' AND COALESCE(d.suspended, 0) = 0 AND v.status IN ('active', 'sold')`
     )

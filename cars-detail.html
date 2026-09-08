@@ -70,13 +70,22 @@
 
       <section class="mx-4 mb-4 bg-white border border-gray-200 rounded-lg p-4">
         <p class="text-xs text-gray-500 uppercase tracking-wider">Listed by</p>
-        <p id="dealerName" class="text-lg font-semibold text-gray-900 mt-1"></p>
-        <span class="inline-flex items-center gap-1 mt-2 rounded-full bg-green-50 text-green-800 text-xs font-semibold px-2.5 py-1 border border-green-200">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
-          Verified Dealer
-        </span>
+        <div class="mt-2 flex items-center gap-3">
+          <a id="dealerLogoLink" href="#" class="shrink-0 w-14 h-14 rounded-xl bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center">
+            <span id="dealerInitials" class="text-lg font-bold text-gray-500">?</span>
+            <img id="dealerLogo" alt="" class="hidden w-full h-full object-contain bg-white" />
+          </a>
+          <div class="min-w-0">
+            <p id="dealerName" class="text-lg font-semibold text-gray-900 leading-tight truncate"></p>
+            <span class="inline-flex items-center gap-1 mt-1 rounded-full bg-green-50 text-green-800 text-xs font-semibold px-2.5 py-0.5 border border-green-200">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
+              Verified Dealer
+            </span>
+          </div>
+        </div>
         <p id="dealerLocation" class="text-sm text-gray-600 mt-2"></p>
         <p id="dealerPhone" class="hidden text-sm text-gray-700 mt-1"></p>
+        <a id="dealerAllCarsLink" href="#" class="hidden mt-3 inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:underline">View all cars from this dealer →</a>
       </section>
 
       <section class="px-4 py-4">
@@ -362,15 +371,26 @@
 
           const dealer = v.dealer || {};
           const dealerNameEl = document.getElementById('dealerName');
-          if (dealer.id) {
-            dealerNameEl.innerHTML =
-              '<a href="/dealer-profile.html?id=' + encodeURIComponent(dealer.id) + '" class="hover:text-blue-700 hover:underline">' +
-              escapeHtml(dealer.business_name || 'Dealer') + '</a>';
+          const dealerName = dealer.business_name || 'Dealer';
+          const profileHref = dealer.id ? '/dealer-profile.html?id=' + encodeURIComponent(dealer.id) : '';
+          if (profileHref) {
+            dealerNameEl.innerHTML = '<a href="' + profileHref + '" class="hover:text-blue-700 hover:underline">' + escapeHtml(dealerName) + '</a>';
+            document.getElementById('dealerLogoLink').href = profileHref;
+            const allLink = document.getElementById('dealerAllCarsLink');
+            allLink.href = profileHref;
+            allLink.classList.remove('hidden');
           } else {
-            dealerNameEl.textContent = dealer.business_name || 'Dealer';
+            dealerNameEl.textContent = dealerName;
+          }
+          document.getElementById('dealerInitials').textContent = dealerName.charAt(0).toUpperCase();
+          if (dealer.logo_url) {
+            const logo = document.getElementById('dealerLogo');
+            logo.src = dealer.logo_url;
+            logo.classList.remove('hidden');
+            document.getElementById('dealerInitials').classList.add('hidden');
           }
           document.getElementById('dealerLocation').textContent =
-            [dealer.city, dealer.state].filter(Boolean).join(', ') || '';
+            dealer.governorate || [dealer.city, dealer.state].filter(Boolean).join(', ') || '';
           const phoneEl = document.getElementById('dealerPhone');
           if (isSignedInBuyer() && dealer.phone) {
             phoneEl.textContent = dealer.phone;

@@ -77,6 +77,19 @@
             </button>
           </div>
 
+          <div class="flex items-center gap-4 mb-5">
+            <div class="relative w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
+              <span id="logoInitials" class="text-xl font-bold text-gray-500">?</span>
+              <img id="logoImg" alt="" class="hidden w-full h-full object-contain bg-white" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-xs font-medium text-gray-500">Logo</span>
+              <button type="button" id="logoUploadBtn" class="mt-1 text-sm font-semibold text-blue-700 hover:text-blue-800">Upload logo</button>
+              <span id="logoStatus" class="block text-xs text-gray-500 mt-0.5">PNG or JPG. Shown on your public profile and your listings.</span>
+              <input type="file" id="logoFileInput" accept="image/*" class="hidden" />
+            </div>
+          </div>
+
           <div class="space-y-4">
             <div>
               <span class="block text-xs font-medium text-gray-500">Phone Number</span>
@@ -109,6 +122,17 @@
                 id="addressEdit"
                 type="text"
                 autocomplete="street-address"
+                class="hidden mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <span class="block text-xs font-medium text-gray-500">Website <span class="font-normal">(optional)</span></span>
+              <p id="websiteView" class="mt-0.5 text-sm text-gray-900">—</p>
+              <input
+                id="websiteEdit"
+                type="url"
+                placeholder="https://your-dealership.com"
                 class="hidden mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -149,6 +173,19 @@
                 <option value="Kafr El Sheikh">Kafr El Sheikh</option>
                 <option value="Damietta">Damietta</option>
               </select>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="block text-xs font-medium text-gray-500">Location on map</span>
+                <button type="button" id="mapResetBtn" class="text-xs font-semibold text-blue-700 hover:text-blue-800">Reset to governorate</button>
+              </div>
+              <p class="text-xs text-gray-500 mt-0.5">Drag the pin to your showroom. Buyers see this on your public profile.</p>
+              <div id="dealerMap" class="mt-2 w-full h-56 rounded-lg border border-gray-200 bg-gray-100 overflow-hidden"></div>
+              <div class="mt-2 flex items-center justify-between gap-2">
+                <span id="mapCoords" class="text-xs text-gray-500">—</span>
+                <button type="button" id="mapSaveBtn" class="rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold px-4 py-2 disabled:opacity-50" disabled>Save location</button>
+              </div>
             </div>
           </div>
         </div>
@@ -243,6 +280,9 @@
     <!-- Dealer bottom nav injected here -->
     <div id="bottomNav"></div>
 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="/js/carfox-geo.js"></script>
     <script src="/js/carfox-dealer-nav.js"></script>
     <script>
       (function () {
@@ -256,6 +296,110 @@
         let dealershipData = null;
         let dealershipEditing = false;
 
+        function escapeAttr(str) {
+          return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function renderLogo(url) {
+          const img = document.getElementById('logoImg');
+          const initials = document.getElementById('logoInitials');
+          initials.textContent = ((dealershipData && dealershipData.business_name) || '?').charAt(0).toUpperCase();
+          if (url) {
+            img.src = url + (url.indexOf('?') === -1 ? '?t=' : '&t=') + Date.now();
+            img.classList.remove('hidden');
+            initials.classList.add('hidden');
+          } else {
+            img.classList.add('hidden');
+            initials.classList.remove('hidden');
+          }
+        }
+
+        document.getElementById('logoUploadBtn').addEventListener('click', function () {
+          document.getElementById('logoFileInput').click();
+        });
+        document.getElementById('logoFileInput').addEventListener('change', async function () {
+          const file = this.files[0];
+          if (!file) return;
+          const token = localStorage.getItem('carfox_token');
+          const formData = new FormData();
+          formData.append('logo', file);
+          const status = document.getElementById('logoStatus');
+          status.textContent = 'Uploading…';
+          try {
+            const res = await fetch('/api/dealer/logo', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: formData });
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) throw new Error(data.error || 'Upload failed');
+            dealershipData.logo_url = data.logo_url;
+            renderLogo(data.logo_url);
+            status.textContent = 'Logo updated.';
+            showSuccessToast('Logo uploaded.');
+          } catch (err) {
+            status.textContent = 'PNG or JPG. Shown on your public profile and your listings.';
+            showErrorToast('Could not upload logo: ' + err.message);
+          } finally {
+            this.value = '';
+          }
+        });
+
+        // ---- Map pin (Leaflet + OpenStreetMap, no API key) ----
+        let dealerMap = null;
+        let dealerMarker = null;
+        let pinDirty = false;
+        function currentGovernorate() {
+          return document.getElementById('governorateEdit').value || (dealershipData && dealershipData.governorate) || '';
+        }
+        function setPin(latlng, dirty) {
+          dealerMarker.setLatLng(latlng);
+          document.getElementById('mapCoords').textContent = Number(latlng.lat).toFixed(5) + ', ' + Number(latlng.lng).toFixed(5) + (dirty ? ' (unsaved)' : '');
+          pinDirty = !!dirty;
+          document.getElementById('mapSaveBtn').disabled = !dirty;
+        }
+        function initDealerMap(d) {
+          if (typeof L === 'undefined' || !window.CarfoxGeo) return;
+          const saved = (d.lat != null && d.lng != null && CarfoxGeo.isInEgypt(Number(d.lat), Number(d.lng))) ? [Number(d.lat), Number(d.lng)] : null;
+          const start = saved || CarfoxGeo.centroidFor(d.governorate) || CarfoxGeo.EGYPT_CENTER;
+          if (!dealerMap) {
+            dealerMap = L.map('dealerMap').setView(start, saved ? 15 : 11);
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(dealerMap);
+            dealerMarker = L.marker(start, { draggable: true }).addTo(dealerMap);
+            dealerMarker.on('dragend', function () { setPin(dealerMarker.getLatLng(), true); });
+            dealerMap.on('click', function (e) { setPin(e.latlng, true); });
+            setTimeout(function () { dealerMap.invalidateSize(); }, 300);
+          } else {
+            dealerMap.setView(start, saved ? 15 : 11);
+          }
+          setPin({ lat: start[0], lng: start[1] }, false);
+          if (!saved) document.getElementById('mapCoords').textContent = 'No pin saved yet — showing ' + (d.governorate || 'Egypt') + '. Drag the pin, then save.';
+        }
+        document.getElementById('mapResetBtn').addEventListener('click', function () {
+          if (!dealerMarker) return;
+          const c = CarfoxGeo.centroidFor(currentGovernorate()) || CarfoxGeo.EGYPT_CENTER;
+          dealerMap.setView(c, 11);
+          setPin({ lat: c[0], lng: c[1] }, true);
+        });
+        document.getElementById('mapSaveBtn').addEventListener('click', async function () {
+          if (!dealerMarker) return;
+          const ll = dealerMarker.getLatLng();
+          const btn = this;
+          btn.disabled = true;
+          try {
+            const res = await fetch('/api/dealer/profile', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('carfox_token') },
+              body: JSON.stringify({ lat: ll.lat, lng: ll.lng })
+            });
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) throw new Error(data.error || 'Could not save location');
+            dealershipData.lat = data.dealership.lat;
+            dealershipData.lng = data.dealership.lng;
+            setPin(ll, false);
+            showSuccessToast('Location saved.');
+          } catch (err) {
+            btn.disabled = false;
+            showErrorToast(err.message);
+          }
+        });
+
         function displayValue(value) {
           const text = value != null ? String(value).trim() : '';
           return text || '—';
@@ -268,6 +412,15 @@
           document.getElementById('whatsappView').textContent = displayValue(dealershipData.whatsapp);
           document.getElementById('addressView').textContent = displayValue(dealershipData.address);
           document.getElementById('governorateView').textContent = displayValue(gov);
+          const websiteView = document.getElementById('websiteView');
+          if (dealershipData.website) {
+            websiteView.innerHTML = '<a href="' + escapeAttr(dealershipData.website) + '" target="_blank" rel="noopener" class="text-blue-700 hover:underline">' + escapeAttr(dealershipData.website.replace(/^https?:\/\//, '')) + '</a>';
+          } else {
+            websiteView.textContent = '—';
+          }
+          document.getElementById('websiteEdit').value = dealershipData.website || '';
+          renderLogo(dealershipData.logo_url);
+          initDealerMap(dealershipData);
 
           document.getElementById('phoneEdit').value = dealershipData.phone || '';
           document.getElementById('whatsappEdit').value = dealershipData.whatsapp || '';
@@ -282,6 +435,7 @@
             { view: 'phoneView', edit: 'phoneEdit' },
             { view: 'whatsappView', edit: 'whatsappEdit' },
             { view: 'addressView', edit: 'addressEdit' },
+            { view: 'websiteView', edit: 'websiteEdit' },
             { view: 'governorateView', edit: 'governorateEdit' }
           ];
 
@@ -341,6 +495,7 @@
             phone: document.getElementById('phoneEdit').value.trim(),
             whatsapp: document.getElementById('whatsappEdit').value.trim(),
             address: document.getElementById('addressEdit').value.trim(),
+            website: document.getElementById('websiteEdit').value.trim(),
             governorate: document.getElementById('governorateEdit').value.trim()
           };
 
@@ -383,7 +538,8 @@
               phone: updated.phone || null,
               whatsapp: updated.whatsapp || null,
               address: updated.address || null,
-              governorate: updated.city || null
+              website: updated.website || null,
+              governorate: updated.governorate || updated.city || null
             });
             setDealershipEditMode(false);
             showSuccessToast('Dealership info saved.');
