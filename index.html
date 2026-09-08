@@ -160,8 +160,16 @@
         <h2 class="font-semibold text-gray-900" data-i18n="home.new_arrivals">New Arrivals</h2>
         <a href="/cars.html" class="text-sm font-medium text-blue-700 hover:text-blue-800" data-i18n="home.see_all">See all →</a>
       </div>
-      <div id="newArrivalsRow" class="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-        <p class="text-sm text-gray-500 py-4 shrink-0" data-i18n="cars.loading">Loading…</p>
+      <div class="relative">
+        <button type="button" data-scroll="prev" aria-label="Scroll left" class="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 items-center justify-center rounded-full bg-white shadow-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-0 disabled:pointer-events-none transition-opacity">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div id="newArrivalsRow" class="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x snap-mandatory scroll-smooth">
+          <p class="text-sm text-gray-500 py-4 shrink-0" data-i18n="cars.loading">Loading…</p>
+        </div>
+        <button type="button" data-scroll="next" aria-label="Scroll right" class="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 items-center justify-center rounded-full bg-white shadow-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-0 disabled:pointer-events-none transition-opacity">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+        </button>
       </div>
     </section>
 
@@ -171,7 +179,7 @@
         <h2 class="font-semibold text-gray-900" data-i18n="home.latest_listings">Latest Listings</h2>
         <a href="/cars.html" class="text-sm font-medium text-blue-700 hover:text-blue-800" data-i18n="home.see_all">See all →</a>
       </div>
-      <div id="latestCarsList" class="divide-y divide-gray-100 rounded-xl bg-white shadow-sm">
+      <div id="latestCarsList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         <p class="text-sm text-gray-500 py-4 text-center" data-i18n="cars.loading">Loading listings…</p>
       </div>
     </section>
@@ -549,36 +557,116 @@
         );
       }
 
-      function renderNewArrivalCard(car) {
-        const link = document.createElement('a');
-        link.href = '/cars-detail.html?id=' + encodeURIComponent(car.id);
-        link.className =
-          'min-w-[160px] w-40 shrink-0 flex flex-col rounded-xl overflow-hidden bg-white shadow-sm border border-gray-100 hover:shadow-md transition-shadow active:opacity-90';
+      // ---- Enriched listing card (shared by New Arrivals and Latest Listings) ----
+      var SPEC_ICONS = {
+        mileage: '<svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3a9 9 0 0 0-9 9c0 2.5 1 4.7 2.6 6.3M12 3a9 9 0 0 1 9 9c0 2.5-1 4.7-2.6 6.3M12 12l4-3"/><circle cx="12" cy="12" r="1.5"/></svg>',
+        fuel: '<svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M5 21h10M8 8h4M15 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V9l-3-3"/></svg>',
+        transmission: '<svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="12" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="12" cy="18" r="2"/><path stroke-linecap="round" d="M6 8v8M12 8v8M18 8v4H6"/></svg>',
+        color: '<svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></svg>',
+        pin: '<svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21s-6-5.3-6-11a6 6 0 1 1 12 0c0 5.7-6 11-6 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+        whatsapp: '<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3.3 4.4c-.2 0-.5.1-.7.3-.3.3-1 1-1 2.3s1 2.7 1.2 2.9c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5-.1 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.3-.1-.1-.3-.2-.6-.3l-2-.9c-.3-.1-.5-.2-.7.1l-.9 1.1c-.2.2-.3.2-.6.1-.3-.1-1.2-.4-2.3-1.4-.9-.8-1.5-1.7-1.6-2-.2-.3 0-.5.1-.6l.5-.6.3-.5c.1-.2 0-.4 0-.5l-.9-2.2c-.2-.5-.4-.5-.6-.5h-.6z"/></svg>',
+        message: '<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12c0 4.4-4 8-9 8a9.9 9.9 0 0 1-4.3-.9L3 20l1.4-3.7C3.5 15 3 13.6 3 12c0-4.4 4-8 9-8s9 3.6 9 8z"/></svg>'
+      };
 
-        const title = [car.year, car.make, car.model].filter(Boolean).join(' ');
-        const mileage = formatMileage(car.mileage);
-        const photoUrl = car.primary_photo_url;
+      // wa.me deep link with the car title prefilled. Egyptian local numbers (01x…) get the +20 prefix.
+      function whatsappHref(car) {
+        var raw = car && car.dealer && car.dealer.whatsapp ? String(car.dealer.whatsapp) : '';
+        var digits = raw.replace(/[^0-9]/g, '');
+        if (!digits) return '';
+        if (digits.indexOf('00') === 0) digits = digits.slice(2);
+        else if (digits.indexOf('0') === 0) digits = '20' + digits.slice(1);
+        var title = [car.year, car.make, car.model].filter(Boolean).join(' ');
+        var url = window.location.origin + '/cars/' + car.id;
+        var text = "Hi, I'm interested in the " + title + ' listed on CarFox: ' + url;
+        return 'https://wa.me/' + digits + '?text=' + encodeURIComponent(text);
+      }
 
-        const photoHtml = photoUrl
-          ? '<img src="' +
-            escapeHtml(photoUrl) +
-            '" alt="" class="w-full h-28 object-cover bg-gray-100" loading="lazy" />'
-          : '<div class="w-full h-28 bg-gray-100 flex items-center justify-center text-2xl" aria-hidden="true">🚗</div>';
+      // Engagement tracking: reuse the listing view counter (the only tracking endpoint today).
+      function trackEngagement(carId) {
+        try {
+          fetch('/api/cars/' + encodeURIComponent(carId) + '/view', { method: 'POST', keepalive: true }).catch(function () {});
+        } catch (_) {}
+      }
 
-        link.innerHTML =
-          photoHtml +
-          '<div class="bg-white p-2 mt-1">' +
-          '<p class="text-xs font-semibold text-gray-800 truncate">' +
-          escapeHtml(title) +
-          '</p>' +
-          '<p class="text-xs font-bold text-blue-700 mt-1">' +
-          escapeHtml(formatPriceEgp(car.price)) +
-          '</p>' +
-          (mileage
-            ? '<p class="text-[10px] text-gray-400 mt-0.5">' + escapeHtml(mileage) + '</p>'
+      function specItem(icon, text) {
+        return '<span class="inline-flex items-center gap-1 min-w-0"><span class="text-gray-400">' + SPEC_ICONS[icon] + '</span><span class="truncate">' + escapeHtml(text) + '</span></span>';
+      }
+
+      // variant: 'scroll' (fixed-width card inside a horizontal row) or 'grid'
+      function renderRichCard(car, variant) {
+        var card = document.createElement('article');
+        card.className =
+          (variant === 'scroll'
+            ? 'snap-start shrink-0 w-[300px] sm:w-[320px] md:w-[calc((100%-1.5rem)/3)] lg:w-[calc((100%-2.25rem)/4)] '
             : '') +
+          'flex flex-col rounded-2xl overflow-hidden bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow';
+
+        var detailHref = '/cars/' + encodeURIComponent(car.id);
+        var title = [car.year, car.make, car.model].filter(Boolean).join(' ');
+        var photoUrl = car.primary_photo_url;
+        var photoHtml = photoUrl
+          ? '<img src="' + escapeHtml(photoUrl) + '" alt="" class="w-full h-44 object-cover bg-gray-100" loading="lazy" />'
+          : '<div class="w-full h-44 bg-gray-100 flex items-center justify-center text-3xl" aria-hidden="true">🚗</div>';
+
+        var specs = [];
+        var mileage = formatMileage(car.mileage);
+        if (mileage) specs.push(specItem('mileage', mileage));
+        if (car.fuel_type) specs.push(specItem('fuel', car.fuel_type));
+        if (car.transmission) specs.push(specItem('transmission', car.transmission));
+        if (car.exterior_color) specs.push(specItem('color', car.exterior_color));
+
+        var location = listingLocation(car);
+        var dealerName = listingDealerName(car);
+        var metaParts = [];
+        if (location) metaParts.push('<span class="inline-flex items-center gap-1 min-w-0"><span class="text-gray-400">' + SPEC_ICONS.pin + '</span><span class="truncate">' + escapeHtml(location) + '</span></span>');
+        if (dealerName) metaParts.push('<span class="truncate">' + escapeHtml(dealerName) + '</span>');
+
+        var wa = whatsappHref(car);
+        var buttons =
+          '<div class="mt-3 flex gap-2">' +
+          (wa
+            ? '<a href="' + escapeHtml(wa) + '" target="_blank" rel="noopener" data-track="whatsapp" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-2">' + SPEC_ICONS.whatsapp + 'WhatsApp</a>'
+            : '') +
+          '<a href="' + detailHref + '?openInquiry=1" data-track="message" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-700 text-blue-700 hover:bg-blue-50 text-sm font-semibold py-2">' + SPEC_ICONS.message + 'Message</a>' +
           '</div>';
-        return link;
+
+        card.innerHTML =
+          '<a href="' + detailHref + '" class="block">' + photoHtml + '</a>' +
+          '<div class="p-3 flex flex-col flex-1">' +
+          '<a href="' + detailHref + '" class="block font-semibold text-gray-900 text-base leading-snug truncate hover:text-blue-700">' + escapeHtml(title) + '</a>' +
+          (specs.length ? '<div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600">' + specs.join('') + '</div>' : '') +
+          '<p class="mt-2 text-lg font-bold text-blue-700">' + escapeHtml(formatPriceEgp(car.price)) + '</p>' +
+          (metaParts.length ? '<div class="mt-1 flex items-center gap-2 text-xs text-gray-500 min-w-0">' + metaParts.join('<span class="text-gray-300">·</span>') + '</div>' : '') +
+          buttons +
+          '</div>';
+
+        card.querySelectorAll('[data-track]').forEach(function (btn) {
+          btn.addEventListener('click', function () { trackEngagement(car.id); });
+        });
+        return card;
+      }
+
+      function initScrollArrows(rowId) {
+        var row = document.getElementById(rowId);
+        if (!row || !row.parentElement) return;
+        var wrap = row.parentElement;
+        var prev = wrap.querySelector('[data-scroll="prev"]');
+        var next = wrap.querySelector('[data-scroll="next"]');
+        if (!prev || !next) return;
+        function update() {
+          var max = row.scrollWidth - row.clientWidth - 2;
+          prev.disabled = row.scrollLeft <= 2;
+          next.disabled = row.scrollLeft >= max;
+        }
+        prev.onclick = function () { row.scrollBy({ left: -row.clientWidth * 0.9, behavior: 'smooth' }); };
+        next.onclick = function () { row.scrollBy({ left: row.clientWidth * 0.9, behavior: 'smooth' }); };
+        row.addEventListener('scroll', update, { passive: true });
+        window.addEventListener('resize', update);
+        update();
+      }
+
+      function renderNewArrivalCard(car) {
+        return renderRichCard(car, 'scroll');
       }
 
       var FALLBACK_NOTICE = 'No listings in this area yet — showing all Egypt instead';
@@ -605,7 +693,6 @@
         const row = document.getElementById('newArrivalsRow');
         if (!row) return;
         const useCity = city || selectedCity || 'All Egypt';
-        console.log('Fetching new arrivals:', buildListingsUrl(useCity, 10));
 
         function render(cars, showFallback) {
           if (!cars.length) {
@@ -616,20 +703,20 @@
           row.innerHTML = '';
           if (showFallback) {
             const note = document.createElement('p');
-            note.className = 'text-xs text-amber-700 py-2 px-2 shrink-0 self-center whitespace-normal w-40';
+            note.className = 'text-xs text-amber-700 py-2 px-2 shrink-0 self-center whitespace-normal w-44';
             note.textContent = FALLBACK_NOTICE;
             row.appendChild(note);
           }
           cars.forEach(function (car) {
             row.appendChild(renderNewArrivalCard(car));
           });
+          initScrollArrows('newArrivalsRow');
         }
 
-        fetchVehicles(useCity, 10)
+        fetchVehicles(useCity, 15)
           .then(function (cars) {
-            console.log('Results:', cars.length, 'cars');
             if (!cars.length && useCity !== 'All Egypt') {
-              return fetchVehicles('All Egypt', 10).then(function (allCars) {
+              return fetchVehicles('All Egypt', 15).then(function (allCars) {
                 render(allCars, true);
               });
             }
@@ -642,53 +729,9 @@
       }
 
       function renderLatestCarCard(car) {
-        const link = document.createElement('a');
-        link.href = '/cars-detail.html?id=' + encodeURIComponent(car.id);
-        link.className = 'flex gap-3 py-3 bg-white active:bg-gray-50';
-
-        const photoUrl = car.primary_photo_url;
-        const thumb = photoUrl
-          ? '<img src="' +
-            escapeHtml(photoUrl) +
-            '" alt="" class="w-28 h-20 shrink-0 rounded-lg object-cover bg-gray-100" loading="lazy" />'
-          : '<div class="w-28 h-20 shrink-0 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 text-xs">' +
-            escapeHtml(window.CarfoxI18n ? CarfoxI18n.t('home.no_photo') : 'No photo') +
-            '</div>';
-
-        const title = [car.year, car.make, car.model].filter(Boolean).join(' ');
-        const mileage = formatMileage(car.mileage);
-        const dealerName = listingDealerName(car);
-        const location = listingLocation(car);
-
-        let bodyHtml =
-          '<p class="font-semibold text-gray-900 text-sm truncate">' +
-          escapeHtml(title) +
-          '</p>';
-
-        if (dealerName) {
-          bodyHtml +=
-            '<p class="text-xs text-gray-500 mt-0.5 truncate">' + escapeHtml(dealerName) + '</p>';
-        }
-
-        bodyHtml +=
-          '<p class="font-bold text-blue-700 text-sm mt-1">' +
-          escapeHtml(formatPriceEgp(car.price)) +
-          '</p>';
-
-        if (mileage) {
-          bodyHtml +=
-            '<p class="text-xs text-gray-500 mt-0.5">' + escapeHtml(mileage) + '</p>';
-        }
-
-        if (location) {
-          bodyHtml +=
-            '<p class="text-xs text-gray-400 mt-0.5 truncate">' + escapeHtml(location) + '</p>';
-        }
-
-        link.innerHTML =
-          thumb + '<div class="flex flex-col justify-center min-w-0 flex-1">' + bodyHtml + '</div>';
-        return link;
+        return renderRichCard(car, 'grid');
       }
+
 
       function loadLatestListings(city) {
         const list = document.getElementById('latestCarsList');
@@ -705,7 +748,7 @@
           if (showFallback) {
             const note = document.createElement('p');
             note.className =
-              'text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 my-2';
+              'col-span-full text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2';
             note.textContent = FALLBACK_NOTICE;
             list.appendChild(note);
           }

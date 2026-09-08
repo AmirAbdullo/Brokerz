@@ -1573,7 +1573,8 @@ function mapPublicCarRow(row) {
       business_name: row.dealer_business_name,
       city: row.dealer_city,
       state: row.dealer_state,
-      governorate: governorate
+      governorate: governorate,
+      whatsapp: row.dealer_whatsapp || null
     },
     published_at: row.published_at,
     status: row.status || 'active'
@@ -1842,7 +1843,8 @@ app.get('/api/vehicles', function (req, res) {
         d.business_name AS dealer_business_name,
         d.city AS dealer_city,
         d.state AS dealer_state,
-        d.governorate AS dealer_governorate
+        d.governorate AS dealer_governorate,
+        d.whatsapp AS dealer_whatsapp
       ${PUBLIC_CARS_FROM_SQL}
       LEFT JOIN vehicle_photos p ON p.vehicle_id = v.id AND p.is_primary = 1
       WHERE ${filter.whereSql}
