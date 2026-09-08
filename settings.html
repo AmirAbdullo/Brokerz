@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarFox — Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] } } } };
+    </script>
+  </head>
+  <body class="bg-gray-50 text-gray-900 font-sans">
+    <header class="sticky top-0 z-40 bg-white border-b border-gray-200">
+      <div class="mx-auto max-w-2xl px-4 h-14 flex items-center justify-between">
+        <a href="/more.html" class="flex items-center gap-2 text-gray-700 hover:text-gray-900" aria-label="Back">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          <span class="text-sm font-semibold hidden sm:inline">Back</span>
+        </a>
+        <h1 class="text-base font-bold">Settings</h1>
+        <a href="/" class="text-lg font-extrabold tracking-tight"><span class="text-blue-700">Car</span><span class="text-orange-500">Fox</span></a>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-2xl px-4 py-5 pb-24 md:pb-10 space-y-4">
+      <div class="rounded-xl border-2 border-dashed border-amber-400 bg-amber-50 text-amber-900 px-4 py-3 text-sm">
+        <strong>PLACEHOLDER CONTENT.</strong> This page is a template. Replace the text below with the final Settings copy before launch.
+      </div>
+      <p class="text-sm text-gray-600">Manage how CarFox works for you. Account details are edited on your profile page.</p>
+      <section class="bg-white border border-gray-200 rounded-xl p-5">
+        <h2 class="font-semibold text-gray-900">Notifications</h2>
+        <div class="mt-2 text-sm text-gray-700 space-y-2"><label class="flex items-center justify-between py-1"><span>Email me when a dealer replies</span><input type="checkbox" class="h-5 w-5" checked disabled /></label><label class="flex items-center justify-between py-1"><span>Email me about new listings matching my searches</span><input type="checkbox" class="h-5 w-5" disabled /></label><p class="text-xs text-gray-500">[PLACEHOLDER — toggles are not wired up yet.]</p></div>
+      </section>
+      <section class="bg-white border border-gray-200 rounded-xl p-5">
+        <h2 class="font-semibold text-gray-900">Language</h2>
+        <div class="mt-2 text-sm text-gray-700 space-y-2"><p>English (Arabic coming soon)</p><p class="text-xs text-gray-500">[PLACEHOLDER — language switch will live here once Arabic/RTL is ready.]</p></div>
+      </section>
+      <section class="bg-white border border-gray-200 rounded-xl p-5">
+        <h2 class="font-semibold text-gray-900">Account</h2>
+        <div class="mt-2 text-sm text-gray-700 space-y-2"><p><a href="/buyer/account.html" class="font-semibold text-blue-700 hover:underline">Edit profile</a></p><p><a href="/buyer/login.html" class="font-semibold text-blue-700 hover:underline">Change password</a> <span class="text-xs text-gray-500">[PLACEHOLDER — password change flow not built yet]</span></p></div>
+      </section>
+
+      <p class="text-center text-xs text-gray-400 pt-2">Last updated: <span class="font-mono">[DATE — replace]</span></p>
+    </main>
+
+    <script src="/js/carfox-auth.js"></script>
+    <script src="/js/carfox-buyer-nav.js"></script>
+    <script src="/js/carfox-quick-search.js"></script>
+  </body>
+</html>

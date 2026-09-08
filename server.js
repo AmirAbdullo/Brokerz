@@ -1509,10 +1509,24 @@ function buildPublicCarsFilter(query) {
     params.push(Math.round(maxYear));
   }
 
-  const maxMileage = parseOptionalNumber(query.max_mileage);
+  let minMileage = parseOptionalNumber(query.min_mileage);
+  let maxMileage = parseOptionalNumber(query.max_mileage);
+  const mileageBounds = swapIfInverted(minMileage, maxMileage);
+  minMileage = mileageBounds.min;
+  maxMileage = mileageBounds.max;
+  if (minMileage != null) {
+    whereParts.push('v.mileage >= ?');
+    params.push(Math.round(minMileage));
+  }
   if (maxMileage != null) {
     whereParts.push('v.mileage <= ?');
     params.push(Math.round(maxMileage));
+  }
+
+  const colors = parseCsvQueryParam(query.color);
+  if (colors.length) {
+    whereParts.push('LOWER(TRIM(v.exterior_color)) IN (' + colors.map(function () { return '?'; }).join(', ') + ')');
+    params.push.apply(params, colors.map(function (c) { return c.toLowerCase(); }));
   }
 
   const q = String(query.q || '').trim();
@@ -1700,6 +1714,14 @@ app.get('/api/cars/filter-options', function (req, res) {
     'v.fuel_type',
     "v.fuel_type IS NOT NULL AND TRIM(v.fuel_type) != ''"
   );
+  // Colors are free text from dealers ("Black" / "black"): group case-insensitively, display capitalised.
+  const colors = groupedFilterOptions(
+    'LOWER(TRIM(v.exterior_color))',
+    "v.exterior_color IS NOT NULL AND TRIM(v.exterior_color) != ''"
+  ).map(function (c) {
+    const name = String(c.name || '');
+    return { name: name.charAt(0).toUpperCase() + name.slice(1), count: c.count };
+  });
 
   const ranges = db
     .prepare(
@@ -1721,6 +1743,7 @@ app.get('/api/cars/filter-options', function (req, res) {
     cities: cities,
     transmissions: transmissions,
     fuel_types: fuelTypes,
+    colors: colors,
     year_range: {
       min: ranges.min_year != null ? ranges.min_year : new Date().getFullYear() - 15,
       max: ranges.max_year != null ? ranges.max_year : new Date().getFullYear()

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarFox — More</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] } } } };
+    </script>
+  </head>
+  <body class="bg-gray-50 text-gray-900 font-sans">
+    <header class="sticky top-0 z-40 bg-white border-b border-gray-200">
+      <div class="mx-auto max-w-2xl px-4 h-14 flex items-center justify-between">
+        <a href="/" class="text-lg font-extrabold tracking-tight"><span class="text-blue-700">Car</span><span class="text-orange-500">Fox</span></a>
+        <h1 class="text-base font-bold">More</h1>
+        <span class="w-16"></span>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-2xl px-4 py-5 pb-24 md:pb-10 space-y-6">
+      <!-- Signed-in summary / sign-in prompt -->
+      <section id="whoami" class="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <div id="avatar" class="w-11 h-11 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">?</div>
+          <div class="min-w-0">
+            <div id="whoName" class="font-semibold truncate">Not signed in</div>
+            <div id="whoSub" class="text-xs text-gray-500 truncate">Sign in to save cars and message dealers</div>
+          </div>
+        </div>
+        <a id="whoAction" href="/buyer/login.html" class="shrink-0 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold px-4 py-2">Sign in</a>
+      </section>
+
+      <!-- Dealer section (only for dealers) -->
+      <section id="dealerSection" class="hidden">
+        <h2 class="px-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Dealer</h2>
+        <div class="mt-2 bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+          <a href="/dealer/dashboard.html" class="row"><span>Dashboard</span></a>
+          <a href="/dealer/inventory.html" class="row"><span>Inventory</span></a>
+          <a href="/dealer/inquiries.html" class="row"><span>Inquiries</span></a>
+        </div>
+      </section>
+
+      <!-- User section -->
+      <section>
+        <h2 class="px-1 text-xs font-semibold uppercase tracking-wide text-gray-500">User</h2>
+        <div class="mt-2 bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+          <a href="/buyer/account.html" data-account-link class="row"><span>Profile</span></a>
+          <a href="/buyer/inbox.html" class="row"><span class="relative inline-flex items-center gap-2">Inbox <span data-messages-unread-dot class="hidden h-2 w-2 rounded-full bg-red-500"></span></span></a>
+          <a href="/settings.html" class="row"><span>Settings</span></a>
+          <a href="/help.html" class="row"><span>Help Center</span></a>
+          <a href="/about.html" class="row"><span>About</span></a>
+          <a href="/terms.html" class="row"><span>Terms &amp; Conditions</span></a>
+          <a href="/privacy.html" class="row"><span>Privacy Policy</span></a>
+        </div>
+      </section>
+
+      <section id="signOutSection" class="hidden">
+        <button type="button" id="signOutBtn" class="w-full rounded-xl border border-gray-300 bg-white text-red-600 font-semibold py-3">Sign out</button>
+      </section>
+
+      <p class="text-center text-xs text-gray-400">CarFox · Verified dealers only</p>
+    </main>
+
+    <style>
+      .row { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; font-size:15px; font-weight:500; color:#111827; }
+      .row:hover { background:#f9fafb; }
+      .row::after { content:''; width:8px; height:8px; border-right:2px solid #9ca3af; border-bottom:2px solid #9ca3af; transform:rotate(-45deg); }
+    </style>
+
+    <script src="/js/carfox-auth.js"></script>
+    <script src="/js/carfox-buyer-nav.js"></script>
+    <script src="/js/carfox-quick-search.js"></script>
+    <script>
+      (function () {
+        const token = CarfoxAuth.getToken();
+        const user = CarfoxAuth.getStoredUser();
+        function render(u) {
+          if (!u) return;
+          const name = u.full_name || u.fullName || u.email || 'Account';
+          document.getElementById('whoName').textContent = name;
+          document.getElementById('avatar').textContent = String(name).charAt(0).toUpperCase();
+          const role = String(u.role || '').toLowerCase();
+          document.getElementById('whoSub').textContent = u.email ? u.email + (role ? ' · ' + role : '') : role;
+          const action = document.getElementById('whoAction');
+          action.textContent = 'Profile';
+          action.href = role === 'dealer' ? '/dealer/account.html' : role === 'admin' ? '/admin/applications.html' : '/buyer/account.html';
+          document.querySelectorAll('[data-account-link]').forEach(function (a) { a.href = action.href; });
+          document.getElementById('signOutSection').classList.remove('hidden');
+          if (role === 'dealer') document.getElementById('dealerSection').classList.remove('hidden');
+        }
+        if (token && user) render(user);
+        if (token) {
+          fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + token } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d || !d.user) { if (!user) return; return; }
+              try { localStorage.setItem(CarfoxAuth.USER_KEY, JSON.stringify(d.user)); } catch (_) {}
+              render(d.user);
+              if (window.CarfoxBuyerNav) CarfoxBuyerNav.initMessagesUnreadBadge();
+            })
+            .catch(function () {});
+        }
+        document.getElementById('signOutBtn').addEventListener('click', function () {
+          CarfoxAuth.clearAuth();
+          window.location.href = '/';
+        });
+      })();
+    </script>
+  </body>
+</html>
