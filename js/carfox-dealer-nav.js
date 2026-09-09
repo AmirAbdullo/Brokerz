@@ -341,6 +341,7 @@
       '<a href="/dealer/inquiries.html" class="relative ' + linkClass('inquiries') + '">Inquiries' +
       '<span data-inquiries-unread-dot class="hidden absolute -top-1 -right-2 h-2 w-2 rounded-full bg-red-500" aria-hidden="true"></span>' +
       '</a>' +
+      '<a href="/dealer/insights.html" class="' + linkClass('insights') + '">Insights</a>' +
       '<a href="/dealer/add-vehicle.html" class="' + linkClass('add') + '">+ Add Vehicle</a>' +
       '</nav>' +
       '</div>' +

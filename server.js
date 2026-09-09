@@ -500,6 +500,11 @@ addColumnIfMissing('users', 'suspended', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('users', 'suspension_reason', 'TEXT');
 addColumnIfMissing('users', 'suspended_at', 'TEXT');
 
+// When a listing was marked sold (for days-to-sell insights). Older sold rows get their
+// last update time, which is when mark-sold happened.
+addColumnIfMissing('vehicles', 'sold_at', 'TEXT');
+db.exec("UPDATE vehicles SET sold_at = COALESCE(updated_at, created_at) WHERE status = 'sold' AND sold_at IS NULL");
+
 // Grandfather in everyone who signed up before email verification existed.
 // Runs only ONCE (guarded by app_meta) so it doesn't auto-verify future
 // pending signups on later restarts. Only NEW signups need to verify.
@@ -3024,9 +3029,128 @@ app.post('/api/vehicles/:id/mark-sold', requireDealer, dealerSuspendedGuard, fun
     return res.status(400).json({ error: 'Only active or paused listings can be marked as sold' });
   }
   const now = new Date().toISOString();
-  db.prepare("UPDATE vehicles SET status = 'sold', updated_at = ? WHERE id = ?").run(now, vehicleId);
+  db.prepare("UPDATE vehicles SET status = 'sold', updated_at = ?, sold_at = ? WHERE id = ?").run(now, now, vehicleId);
   const row = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(vehicleId);
   return res.json({ vehicle: row });
+});
+
+// Dealer: inventory insights (rule-based, from the dealer's own listings, views, engagements, sales)
+app.get('/api/dealer/insights', requireDealer, function (req, res) {
+  const dealershipId = req.dealership.id;
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const since30 = new Date(now - 30 * DAY).toISOString();
+  const days = function (fromIso, toMs) {
+    const t = Date.parse(fromIso);
+    return isFinite(t) ? Math.max(0, Math.round((toMs - t) / DAY)) : null;
+  };
+
+  const engagementByVehicle = {};
+  db.prepare(
+    'SELECT vehicle_id, COUNT(*) AS c FROM engagement_events WHERE dealership_id = ? AND created_at >= ? AND vehicle_id IS NOT NULL GROUP BY vehicle_id'
+  ).all(dealershipId, since30).forEach(function (r) { engagementByVehicle[r.vehicle_id] = r.c; });
+
+  const vehicles = db
+    .prepare(
+      `SELECT v.id, v.year, v.make, v.model, v.body_type, v.price, v.status, COALESCE(v.views, 0) AS views,
+              v.published_at, v.created_at, v.sold_at, p.url AS primary_photo_url
+       FROM vehicles v
+       LEFT JOIN vehicle_photos p ON p.vehicle_id = v.id AND p.is_primary = 1
+       WHERE v.dealership_id = ? AND v.status IN ('active', 'paused', 'sold')`
+    )
+    .all(dealershipId)
+    .map(function (v) {
+      const listedSince = v.published_at || v.created_at;
+      return {
+        id: v.id, year: v.year, make: v.make, model: v.model, body_type: v.body_type, price: v.price,
+        status: v.status, views: v.views, primary_photo_url: v.primary_photo_url || null,
+        listed_since: listedSince,
+        days_listed: days(listedSince, now),
+        sold_at: v.sold_at || null,
+        days_to_sell: v.status === 'sold' && v.sold_at ? days(listedSince, Date.parse(v.sold_at)) : null,
+        engagements_30d: engagementByVehicle[v.id] || 0
+      };
+    });
+
+  const active = vehicles.filter(function (v) { return v.status === 'active'; });
+
+  // 1. Stale stock: active 30+ days, oldest first
+  const stale = active
+    .filter(function (v) { return v.days_listed != null && v.days_listed >= 30; })
+    .sort(function (a, b) { return b.days_listed - a.days_listed; });
+
+  // 2. Best performers: views + engagements (30d) across live listings and recent sales
+  const best = vehicles
+    .filter(function (v) { return v.status === 'active' || (v.status === 'sold' && v.sold_at && v.sold_at >= since30); })
+    .map(function (v) { return Object.assign({}, v, { score: v.views + v.engagements_30d }); })
+    .filter(function (v) { return v.score > 0; })
+    .sort(function (a, b) { return b.score - a.score; })
+    .slice(0, 5);
+
+  // 3. Sales summary: last 6 months + days-to-sell
+  const sold = vehicles.filter(function (v) { return v.status === 'sold' && v.sold_at; });
+  const months = [];
+  const base = new Date(now);
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    months.push({ key: key, label: d.toLocaleString('en', { month: 'short' }), sold: 0 });
+  }
+  sold.forEach(function (v) {
+    const key = v.sold_at.slice(0, 7);
+    const m = months.find(function (x) { return x.key === key; });
+    if (m) m.sold += 1;
+  });
+  const sold6m = months.reduce(function (s, m) { return s + m.sold; }, 0);
+  const withDays = sold.filter(function (v) { return v.days_to_sell != null; });
+  const avg = function (arr) { return arr.length ? Math.round(arr.reduce(function (s, x) { return s + x; }, 0) / arr.length) : null; };
+  const enoughHistory = sold.length >= 3;
+  const byMakeMap = {};
+  withDays.forEach(function (v) {
+    const k = v.make || 'Unknown';
+    (byMakeMap[k] = byMakeMap[k] || []).push(v.days_to_sell);
+  });
+  const byMake = Object.keys(byMakeMap).map(function (make) {
+    return { make: make, count: byMakeMap[make].length, avg_days: avg(byMakeMap[make]) };
+  }).sort(function (a, b) { return a.avg_days - b.avg_days; });
+
+  // 4. Restock hints: fastest make+model with repeat sales; slow movers grouped by body type
+  const byModelMap = {};
+  withDays.forEach(function (v) {
+    const k = [v.make, v.model].filter(Boolean).join(' ') || 'Unknown';
+    (byModelMap[k] = byModelMap[k] || []).push(v.days_to_sell);
+  });
+  const fast = Object.keys(byModelMap)
+    .map(function (label) { return { label: label, count: byModelMap[label].length, avg_days: avg(byModelMap[label]) }; })
+    .filter(function (x) { return x.count >= 2; })
+    .sort(function (a, b) { return a.avg_days - b.avg_days || b.count - a.count; })
+    .slice(0, 3);
+  const slowMap = {};
+  active.filter(function (v) { return v.days_listed != null && v.days_listed >= 45; }).forEach(function (v) {
+    const label = v.body_type ? (v.body_type === 'Other' ? 'other cars' : v.body_type + 's') : (v.make ? v.make + ' cars' : 'cars');
+    const g = (slowMap[label] = slowMap[label] || { label: label, count: 0, oldest_days: 0 });
+    g.count += 1;
+    g.oldest_days = Math.max(g.oldest_days, v.days_listed);
+  });
+  const slow = Object.keys(slowMap).map(function (k) { return slowMap[k]; })
+    .sort(function (a, b) { return b.count - a.count || b.oldest_days - a.oldest_days; });
+
+  const pick = function (v) {
+    return {
+      id: v.id, year: v.year, make: v.make, model: v.model, body_type: v.body_type, price: v.price, status: v.status,
+      primary_photo_url: v.primary_photo_url, views: v.views, engagements_30d: v.engagements_30d,
+      days_listed: v.days_listed, score: v.score
+    };
+  };
+
+  return res.json({
+    generated_at: new Date(now).toISOString(),
+    summary: { active_listings: active.length, stale_count: stale.length, sold_6m: sold6m, sold_total: sold.length },
+    stale: stale.map(pick),
+    best: best.map(pick),
+    sales: { enough_history: enoughHistory, months: months, avg_days_overall: enoughHistory ? avg(withDays.map(function (v) { return v.days_to_sell; })) : null, by_make: enoughHistory ? byMake : [] },
+    hints: { enough_history: enoughHistory, fast: enoughHistory ? fast : [], slow: slow }
+  });
 });
 
 // Dealer: create vehicle (approved dealers only) — legacy one-shot create

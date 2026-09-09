@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarFox — Inventory Insights</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] } } } };
+    </script>
+    <style>
+      .bar { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
+      .bar > span { display: block; height: 100%; border-radius: 999px; background: #1d4ed8; }
+      .vbar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; }
+      .vbar > i { display: block; width: 100%; max-width: 44px; border-radius: 8px 8px 4px 4px; background: #1d4ed8; transition: height .3s; }
+    </style>
+  </head>
+  <body class="bg-gray-50 text-gray-900 font-sans">
+    <div id="pageLoading" class="px-4 py-16 text-center text-sm text-gray-600">Loading insights…</div>
+
+    <main id="pageContent" class="hidden mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-24 md:pb-12">
+      <section class="py-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Insights</h1>
+          <p class="mt-1 text-sm text-gray-600">Rule-based observations from your own listings, views, engagements and sales. <span id="asOf" class="text-gray-400"></span></p>
+        </div>
+        <a href="/dealer/dashboard.html" class="text-sm font-semibold text-blue-700 hover:underline">← Dashboard</a>
+      </section>
+
+      <!-- Summary tiles -->
+      <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white border border-gray-200 rounded-lg p-4"><div class="text-sm text-gray-600">Active listings</div><div id="tileActive" class="mt-1 text-2xl font-bold">—</div></div>
+        <div class="bg-white border border-gray-200 rounded-lg p-4"><div class="text-sm text-gray-600">Stale (30+ days)</div><div id="tileStale" class="mt-1 text-2xl font-bold">—</div></div>
+        <div class="bg-white border border-gray-200 rounded-lg p-4"><div class="text-sm text-gray-600">Sold (6 months)</div><div id="tileSold" class="mt-1 text-2xl font-bold">—</div></div>
+        <div class="bg-white border border-gray-200 rounded-lg p-4"><div class="text-sm text-gray-600">Avg days to sell</div><div id="tileAvgDays" class="mt-1 text-2xl font-bold">—</div></div>
+      </section>
+
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        <!-- Stale stock -->
+        <section class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div><h2 class="font-semibold text-gray-900">Stale stock</h2><p class="text-xs text-gray-500">Active for 30+ days, oldest first</p></div>
+            <span id="staleCount" class="text-xs font-semibold rounded-full bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5"></span>
+          </div>
+          <div id="staleEmpty" class="hidden px-5 py-8 text-sm text-gray-600 text-center">Nothing has been listed for 30 days or more. Nice turnover.</div>
+          <div class="hidden md:block overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <tr><th class="px-5 py-2">Listing</th><th class="px-3 py-2 text-right">Days</th><th class="px-3 py-2 text-right">Views</th><th class="px-3 py-2 text-right">Engagements (30d)</th><th class="px-3 py-2"></th></tr>
+              </thead>
+              <tbody id="staleRows" class="divide-y divide-gray-100"></tbody>
+            </table>
+          </div>
+          <ul id="staleList" class="md:hidden divide-y divide-gray-100"></ul>
+          <p id="staleTip" class="hidden px-5 py-3 text-xs text-amber-800 bg-amber-50 border-t border-amber-100">Consider a price reduction or refreshed photos for these listings.</p>
+        </section>
+
+        <!-- Best performers -->
+        <section class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100">
+            <h2 class="font-semibold text-gray-900">Best performers</h2>
+            <p class="text-xs text-gray-500">Ranked by views plus engagements in the last 30 days</p>
+          </div>
+          <div id="bestEmpty" class="hidden px-5 py-8 text-sm text-gray-600 text-center">No views or engagements yet. Share your listings to get them moving.</div>
+          <ol id="bestList" class="divide-y divide-gray-100"></ol>
+        </section>
+      </div>
+
+      <!-- Sales summary -->
+      <section class="mt-6 bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h2 class="font-semibold text-gray-900">Sales summary</h2>
+          <p class="text-xs text-gray-500">Cars sold per month over the last 6 months, and how long they took</p>
+        </div>
+        <div id="salesEmpty" class="hidden px-5 py-8 text-sm text-gray-600 text-center">Not enough history yet — insights improve as you sell.</div>
+        <div id="salesBody" class="grid gap-6 lg:grid-cols-3 p-5">
+          <div class="lg:col-span-2">
+            <div id="salesChart" class="grid grid-cols-6 gap-2 items-end h-40"></div>
+            <div id="salesLabels" class="mt-2 grid grid-cols-6 gap-2 text-center text-xs text-gray-500"></div>
+          </div>
+          <div>
+            <div class="text-sm text-gray-600">Average days to sell</div>
+            <div id="avgDaysOverall" class="text-3xl font-bold text-gray-900">—</div>
+            <div class="mt-3 text-xs font-semibold uppercase tracking-wide text-gray-500">By make</div>
+            <ul id="avgDaysByMake" class="mt-1 divide-y divide-gray-100 text-sm"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Restock hints -->
+      <section class="mt-6 bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h2 class="font-semibold text-gray-900">Restock hints</h2>
+          <p class="text-xs text-gray-500">What sells fastest for you, and what is sitting</p>
+        </div>
+        <div id="hintsEmpty" class="hidden px-5 py-8 text-sm text-gray-600 text-center">Not enough history yet — insights improve as you sell.</div>
+        <div id="hintsBody" class="grid gap-4 md:grid-cols-2 p-5">
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-green-700">Fast sellers</div>
+            <ul id="fastList" class="mt-2 space-y-2"></ul>
+          </div>
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-amber-700">Slow movers</div>
+            <ul id="slowList" class="mt-2 space-y-2"></ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="dealerBottomNav"></div>
+
+    <script src="/js/carfox-dealer-nav.js"></script>
+    <script>
+      (function () {
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const fmtPrice = (cents) => (!cents || cents <= 0) ? '—' : Math.round(Number(cents) / 100).toLocaleString('en-EG') + ' EGP';
+        const n = (v) => Number(v || 0).toLocaleString('en-US');
+        const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
+
+        function thumb(v) {
+          return v.primary_photo_url
+            ? '<img src="' + esc(v.primary_photo_url) + '" alt="" class="w-14 h-10 rounded-md object-cover bg-gray-100 shrink-0" loading="lazy" />'
+            : '<div class="w-14 h-10 rounded-md bg-gray-100 shrink-0"></div>';
+        }
+        function titleOf(v) { return [v.year, v.make, v.model].filter(Boolean).join(' '); }
+
+        function renderStale(list) {
+          $('staleCount').textContent = plural(list.length, 'listing', 'listings');
+          $('staleEmpty').classList.toggle('hidden', list.length > 0);
+          $('staleTip').classList.toggle('hidden', list.length === 0);
+          const rows = $('staleRows'); rows.innerHTML = '';
+          const ul = $('staleList'); ul.innerHTML = '';
+          list.forEach((v) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML =
+              '<td class="px-5 py-2.5"><a href="/dealer/preview-vehicle.html?id=' + v.id + '" class="flex items-center gap-3 hover:text-blue-700">' + thumb(v) +
+              '<span><span class="block font-semibold text-gray-900">' + esc(titleOf(v)) + '</span><span class="block text-xs text-gray-500">' + esc(fmtPrice(v.price)) + '</span></span></a></td>' +
+              '<td class="px-3 py-2.5 text-right tabular-nums font-semibold ' + (v.days_listed >= 60 ? 'text-red-700' : 'text-amber-700') + '">' + v.days_listed + '</td>' +
+              '<td class="px-3 py-2.5 text-right tabular-nums">' + n(v.views) + '</td>' +
+              '<td class="px-3 py-2.5 text-right tabular-nums">' + n(v.engagements_30d) + '</td>' +
+              '<td class="px-3 py-2.5 text-right"><a href="/dealer/add-vehicle.html?id=' + v.id + '" class="text-xs font-semibold text-blue-700 hover:underline">Edit</a></td>';
+            rows.appendChild(tr);
+            const li = document.createElement('li');
+            li.className = 'px-4 py-3 flex items-center gap-3';
+            li.innerHTML = thumb(v) +
+              '<div class="min-w-0 flex-1"><div class="font-semibold text-gray-900 truncate">' + esc(titleOf(v)) + '</div>' +
+              '<div class="text-xs text-gray-500">' + v.days_listed + ' days · ' + n(v.views) + ' views · ' + n(v.engagements_30d) + ' engagements</div></div>' +
+              '<a href="/dealer/add-vehicle.html?id=' + v.id + '" class="text-xs font-semibold text-blue-700">Edit</a>';
+            ul.appendChild(li);
+          });
+        }
+
+        function renderBest(list) {
+          $('bestEmpty').classList.toggle('hidden', list.length > 0);
+          const ol = $('bestList'); ol.innerHTML = '';
+          const max = Math.max(1, ...list.map((v) => v.score));
+          list.forEach((v, i) => {
+            const li = document.createElement('li');
+            li.className = 'px-5 py-3 flex items-center gap-3';
+            li.innerHTML =
+              '<span class="w-6 text-sm font-bold text-gray-400">' + (i + 1) + '</span>' + thumb(v) +
+              '<div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2"><span class="font-semibold text-gray-900 truncate">' + esc(titleOf(v)) +
+              (v.status === 'sold' ? ' <span class="text-xs font-semibold text-gray-500">(sold)</span>' : '') + '</span>' +
+              '<span class="text-xs text-gray-500 shrink-0">' + n(v.views) + ' views · ' + n(v.engagements_30d) + ' eng.</span></div>' +
+              '<div class="bar mt-1.5"><span style="width:' + Math.round((v.score / max) * 100) + '%"></span></div></div>';
+            ol.appendChild(li);
+          });
+        }
+
+        function renderSales(sales) {
+          if (!sales.enough_history) { $('salesEmpty').classList.remove('hidden'); $('salesBody').classList.add('hidden'); return; }
+          const chart = $('salesChart'); chart.innerHTML = '';
+          const labels = $('salesLabels'); labels.innerHTML = '';
+          const max = Math.max(1, ...sales.months.map((m) => m.sold));
+          sales.months.forEach((m) => {
+            const col = document.createElement('div');
+            col.className = 'vbar h-full';
+            col.innerHTML = '<span class="text-xs font-semibold text-gray-700">' + m.sold + '</span><i style="height:' + Math.max(4, Math.round((m.sold / max) * 100)) + '%"></i>';
+            chart.appendChild(col);
+            const lab = document.createElement('div');
+            lab.textContent = m.label;
+            labels.appendChild(lab);
+          });
+          $('avgDaysOverall').textContent = sales.avg_days_overall != null ? sales.avg_days_overall + ' days' : '—';
+          const ul = $('avgDaysByMake'); ul.innerHTML = '';
+          sales.by_make.forEach((m) => {
+            const li = document.createElement('li');
+            li.className = 'py-1.5 flex items-center justify-between';
+            li.innerHTML = '<span>' + esc(m.make) + ' <span class="text-xs text-gray-400">(' + m.count + ')</span></span><span class="font-semibold">' + m.avg_days + ' days</span>';
+            ul.appendChild(li);
+          });
+        }
+
+        function renderHints(h) {
+          if (!h.enough_history && !h.slow.length) { $('hintsEmpty').classList.remove('hidden'); $('hintsBody').classList.add('hidden'); return; }
+          const fast = $('fastList'); fast.innerHTML = '';
+          const slow = $('slowList'); slow.innerHTML = '';
+          if (!h.enough_history) {
+            fast.innerHTML = '<li class="text-sm text-gray-600">Not enough history yet — insights improve as you sell.</li>';
+          } else if (!h.fast.length) {
+            fast.innerHTML = '<li class="text-sm text-gray-600">No repeat sellers yet.</li>';
+          }
+          h.fast.forEach((f) => {
+            const li = document.createElement('li');
+            li.className = 'rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900';
+            li.innerHTML = '<strong>' + esc(f.label) + '</strong> sell in avg <strong>' + f.avg_days + ' days</strong> (' + plural(f.count, 'sale', 'sales') + ') — consider restocking.';
+            fast.appendChild(li);
+          });
+          if (!h.slow.length) slow.innerHTML = '<li class="text-sm text-gray-600">Nothing unsold for 45+ days.</li>';
+          h.slow.forEach((s) => {
+            const li = document.createElement('li');
+            li.className = 'rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900';
+            li.innerHTML = '<strong>' + s.count + ' ' + esc(s.label) + '</strong> unsold 45+ days' + (s.oldest_days ? ' (oldest ' + s.oldest_days + ' days)' : '') + '.';
+            slow.appendChild(li);
+          });
+        }
+
+        function render(d) {
+          $('asOf').textContent = 'As of ' + new Date(d.generated_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + '.';
+          $('tileActive').textContent = n(d.summary.active_listings);
+          $('tileStale').textContent = n(d.summary.stale_count);
+          $('tileSold').textContent = n(d.summary.sold_6m);
+          $('tileAvgDays').textContent = d.sales.avg_days_overall != null ? d.sales.avg_days_overall : '—';
+          renderStale(d.stale);
+          renderBest(d.best);
+          renderSales(d.sales);
+          renderHints(d.hints);
+        }
+
+        CarfoxDealerNav.requireDealerPageAuth('/dealer/insights.html').then(function (s) {
+          if (!s) return;
+          CarfoxDealerNav.mountDealerBottomNav(document.getElementById('dealerBottomNav'), 'dashboard');
+          CarfoxDealerNav.mountDealerDesktopHeader('insights');
+          return fetch('/api/dealer/insights', { headers: { Authorization: 'Bearer ' + s.token } })
+            .then((r) => { if (!r.ok) throw new Error('load'); return r.json(); })
+            .then((d) => { render(d); $('pageLoading').classList.add('hidden'); $('pageContent').classList.remove('hidden'); });
+        }).catch(function () { $('pageLoading').textContent = 'Could not load insights. Please refresh.'; });
+      })();
+    </script>
+  </body>
+</html>
