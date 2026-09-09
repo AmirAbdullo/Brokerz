@@ -123,6 +123,7 @@
     </main>
 
 
+    <script src="/js/carfox-cropper.js"></script>
     <script src="/js/carfox-auth.js"></script>
     <script src="/js/carfox-buyer-nav.js"></script>
     <script>
@@ -230,11 +231,22 @@
 
         document.getElementById('avatarFileInput').addEventListener('change', async function () {
           const file = this.files[0];
+          this.value = '';
           if (!file) return;
+
+          // Crop / zoom first (square, circular mask); upload the cropped blob instead of the raw file.
+          let blob;
+          try {
+            blob = await CarfoxCropper.open(file, { shape: 'circle', title: 'Adjust profile photo', output: 'image/jpeg', size: 512 });
+          } catch (err) {
+            alert(err.message || 'Could not open the image editor');
+            return;
+          }
+          if (!blob) return; // cancelled
 
           const token = localStorage.getItem('carfox_token');
           const formData = new FormData();
-          formData.append('photo', file);
+          formData.append('photo', blob, 'avatar.jpg');
 
           const wrapper = document.getElementById('avatarWrapper');
           wrapper.style.opacity = '0.5';
@@ -258,7 +270,6 @@
           } finally {
             wrapper.style.opacity = '';
             wrapper.style.pointerEvents = '';
-            this.value = '';
           }
         });
       })();

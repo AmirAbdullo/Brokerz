@@ -283,6 +283,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script src="/js/carfox-geo.js"></script>
+    <script src="/js/carfox-cropper.js"></script>
     <script src="/js/carfox-dealer-nav.js"></script>
     <script>
       (function () {
@@ -319,10 +320,19 @@
         });
         document.getElementById('logoFileInput').addEventListener('change', async function () {
           const file = this.files[0];
+          this.value = '';
           if (!file) return;
+          let blob;
+          try {
+            blob = await CarfoxCropper.open(file, { shape: 'square', title: 'Adjust logo', output: 'image/png', size: 512 });
+          } catch (err) {
+            showErrorToast(err.message || 'Could not open the image editor');
+            return;
+          }
+          if (!blob) return; // cancelled
           const token = localStorage.getItem('carfox_token');
           const formData = new FormData();
-          formData.append('logo', file);
+          formData.append('logo', blob, 'logo.png');
           const status = document.getElementById('logoStatus');
           status.textContent = 'Uploading…';
           try {
@@ -336,8 +346,6 @@
           } catch (err) {
             status.textContent = 'PNG or JPG. Shown on your public profile and your listings.';
             showErrorToast('Could not upload logo: ' + err.message);
-          } finally {
-            this.value = '';
           }
         });
 
@@ -606,11 +614,22 @@
 
         document.getElementById('avatarFileInput').addEventListener('change', async function () {
           const file = this.files[0];
+          this.value = '';
           if (!file) return;
+
+          // Crop / zoom first (square, circular mask); upload the cropped blob instead of the raw file.
+          let blob;
+          try {
+            blob = await CarfoxCropper.open(file, { shape: 'circle', title: 'Adjust profile photo', output: 'image/jpeg', size: 512 });
+          } catch (err) {
+            alert(err.message || 'Could not open the image editor');
+            return;
+          }
+          if (!blob) return; // cancelled
 
           const token = localStorage.getItem('carfox_token');
           const formData = new FormData();
-          formData.append('photo', file);
+          formData.append('photo', blob, 'avatar.jpg');
 
           const wrapper = document.getElementById('avatarWrapper');
           wrapper.style.opacity = '0.5';
@@ -634,7 +653,6 @@
           } finally {
             wrapper.style.opacity = '';
             wrapper.style.pointerEvents = '';
-            this.value = '';
           }
         });
       })();
