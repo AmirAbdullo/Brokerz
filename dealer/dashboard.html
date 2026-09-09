@@ -71,7 +71,7 @@
       </section>
 
       <!-- Quick stats -->
-      <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <section class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div class="bg-white border border-gray-200 rounded-lg p-4">
           <div class="text-sm text-gray-600">Active Listings</div>
           <div id="statActive" class="mt-1 text-2xl font-bold text-gray-900">—</div>
@@ -79,6 +79,11 @@
         <div class="bg-white border border-gray-200 rounded-lg p-4">
           <div class="text-sm text-gray-600">Total Views (30d)</div>
           <div id="statViews" class="mt-1 text-2xl font-bold text-gray-900">—</div>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="text-sm text-gray-600">Engagements (30d)</div>
+          <div id="statEngagements" class="mt-1 text-2xl font-bold text-gray-900">—</div>
+          <div id="statEngagementBreakdown" class="mt-1 text-xs text-gray-500 leading-snug"></div>
         </div>
         <div id="statInquiriesCard" class="bg-white border border-gray-200 rounded-lg p-4">
           <div class="text-sm text-gray-600">New Inquiries</div>
@@ -426,6 +431,12 @@
           const stats = await statsRes.json();
           document.getElementById('statActive').textContent = formatStatNumber(stats.active_listings);
           document.getElementById('statViews').textContent = formatStatNumber(stats.total_views_30d);
+          document.getElementById('statEngagements').textContent = formatStatNumber(stats.engagements_30d || 0);
+          const eb = stats.engagement_breakdown || {};
+          const parts = ['WhatsApp ' + (eb.whatsapp || 0), 'Calls ' + (eb.call || 0), 'Messages ' + (eb.message || 0)];
+          if (eb.share) parts.push('Shares ' + eb.share);
+          if (eb.website) parts.push('Website ' + eb.website);
+          document.getElementById('statEngagementBreakdown').textContent = parts.join(' · ');
           document.getElementById('statSold').textContent = formatStatNumber(stats.sold_this_month);
           renderPlanUsage(stats);
         }

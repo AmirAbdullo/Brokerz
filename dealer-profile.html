@@ -105,6 +105,7 @@
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="/js/carfox-track.js"></script>
     <script src="/js/carfox-auth.js"></script>
     <script src="/js/carfox-buyer-nav.js"></script>
     <script src="/js/carfox-geo.js"></script>
@@ -192,6 +193,10 @@
             $('callBtn').classList.remove('hidden');
           }
           if (!wa && !dealer.phone) $('contactNote').classList.remove('hidden');
+          const track = (type) => { if (window.CarfoxTrack) CarfoxTrack.engagement(type, { dealershipId: dealer.id }); };
+          $('whatsappBtn').addEventListener('click', () => track('whatsapp'));
+          $('callBtn').addEventListener('click', () => track('call'));
+          $('dealerWebsite').addEventListener('click', () => track('website'));
 
           const grid = $('vehicleGrid');
           grid.innerHTML = '';

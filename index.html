@@ -231,6 +231,7 @@
     <!-- Mobile bottom navigation (visible on mobile only) -->
 
     <script src="/js/carfox-i18n.js"></script>
+    <script src="/js/carfox-track.js"></script>
     <script src="/js/carfox-auth.js"></script>
     <script src="/js/carfox-buyer-nav.js"></script>
     <script>
@@ -581,11 +582,9 @@
         return 'https://wa.me/' + digits + '?text=' + encodeURIComponent(text);
       }
 
-      // Engagement tracking: reuse the listing view counter (the only tracking endpoint today).
-      function trackEngagement(carId) {
-        try {
-          fetch('/api/cars/' + encodeURIComponent(carId) + '/view', { method: 'POST', keepalive: true }).catch(function () {});
-        } catch (_) {}
+      // Engagement tracking (WhatsApp / Message taps), separate from listing views.
+      function trackEngagement(type, carId) {
+        if (window.CarfoxTrack) CarfoxTrack.engagement(type, { vehicleId: carId });
       }
 
       function specItem(icon, text) {
@@ -641,7 +640,7 @@
           '</div>';
 
         card.querySelectorAll('[data-track]').forEach(function (btn) {
-          btn.addEventListener('click', function () { trackEngagement(car.id); });
+          btn.addEventListener('click', function () { trackEngagement(btn.getAttribute('data-track'), car.id); });
         });
         return card;
       }

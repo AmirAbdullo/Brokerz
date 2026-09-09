@@ -72,6 +72,7 @@
               <th class="px-4 py-3">Plan</th>
               <th class="px-4 py-3 w-48">Listings</th>
               <th class="px-4 py-3 text-right">Views</th>
+              <th class="px-4 py-3 text-right">Engagements (30d)</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Actions</th>
             </tr>
@@ -259,6 +260,7 @@
             '<td class="px-4 py-3 align-top whitespace-nowrap">' + esc(planLabel(d.plan, d.listing_limit)) + '</td>' +
             '<td class="px-4 py-3 align-top">' + usageBar(d) + '</td>' +
             '<td class="px-4 py-3 align-top text-right tabular-nums">' + Number(d.total_views || 0).toLocaleString() + '</td>' +
+            '<td class="px-4 py-3 align-top text-right tabular-nums">' + Number(d.engagements_30d || 0).toLocaleString() + '</td>' +
             '<td class="px-4 py-3 align-top">' + statusBadge(d) + (d.suspended ? '<div class="mt-1 text-xs text-red-700 max-w-[10rem]">' + esc(d.suspension_reason || '') + '</div>' : '') + '</td>' +
             '<td class="px-4 py-3 align-top"><div class="flex flex-col gap-2" data-actions></div></td>';
           const actions = tr.querySelector('[data-actions]');
@@ -277,6 +279,7 @@
             '<div>Region: <span class="text-gray-900">' + esc(d.governorate || '—') + '</span></div>' +
             '<div>Joined: <span class="text-gray-900">' + fmtDate(d.created_at) + '</span></div>' +
             '<div>Views: <span class="text-gray-900">' + Number(d.total_views || 0).toLocaleString() + '</span></div>' +
+            '<div>Engagements (30d): <span class="text-gray-900">' + Number(d.engagements_30d || 0).toLocaleString() + '</span></div>' +
             '<div class="col-span-2">Plan: <span class="text-gray-900">' + esc(planLabel(d.plan, d.listing_limit)) + '</span></div>' +
             '</div>' +
             '<div class="mt-2">' + usageBar(d) + '</div>' +

@@ -34,13 +34,19 @@
           </svg>
         </a>
         <span class="text-sm font-semibold text-gray-700">Listing</span>
+        <div class="flex items-center">
+        <button type="button" id="detailShareBtn" class="p-2 text-gray-400 hover:text-gray-700" aria-label="Share listing">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.7 10.7l6.6-3.4M8.7 13.3l6.6 3.4"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+        </button>
         <button type="button" id="detailSaveBtn" class="p-2 text-gray-400 hover:text-gray-700" aria-label="Save for later">
           <svg id="detailSaveIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
           </svg>
         </button>
+        </div>
       </div>
     </header>
+    <div id="shareToast" class="hidden fixed top-20 inset-x-0 mx-auto w-max max-w-[90%] rounded-lg bg-gray-900 text-white text-sm font-semibold px-4 py-2 shadow-lg z-50">Link copied</div>
 
     <div id="pageLoading" class="px-4 py-16 text-center text-gray-600">Loading listing…</div>
 
@@ -113,6 +119,11 @@
             </svg>
             WhatsApp
           </a>
+          <a id="callDealerBtn" href="#"
+             class="hidden bg-white border border-blue-700 text-blue-700 hover:bg-blue-50 rounded-xl py-3 font-semibold flex items-center justify-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 0 1 2-2h2.6a1 1 0 0 1 .95.68l1.2 3.6a1 1 0 0 1-.25 1.02L8.1 9.7a12.05 12.05 0 0 0 6.2 6.2l1.4-1.4a1 1 0 0 1 1.02-.25l3.6 1.2a1 1 0 0 1 .68.95V19a2 2 0 0 1-2 2h-1C9.7 21 3 14.3 3 6V5z"/></svg>
+            Call
+          </a>
         </div>
       </div>
     </div>
@@ -139,6 +150,7 @@
       };
     </script>
 
+    <script src="/js/carfox-track.js"></script>
     <script src="/js/carfox-auth.js"></script>
     <script src="/js/carfox-buyer-nav.js"></script>
     <script>
@@ -195,21 +207,51 @@
         function updateContactActions(vehicle) {
           const dealer = (vehicle && vehicle.dealer) || {};
           const waUrl = buildWhatsAppUrl(dealer, vehicle);
-          console.log('full vehicle object:', JSON.stringify(vehicle));
-          console.log('dealer object:', JSON.stringify(dealer));
-          console.log('whatsapp value:', dealer.whatsapp);
-          console.log('waUrl:', waUrl);
           const contactBtn = document.getElementById('contactDealerBtn');
           const waBtn = document.getElementById('whatsappDealerBtn');
+          const callBtn = document.getElementById('callDealerBtn');
+          const phoneDigits = dealer.phone ? String(dealer.phone).replace(/[^0-9+]/g, '') : '';
 
           if (waUrl) {
             waBtn.href = waUrl;
             waBtn.classList.remove('hidden');
-            contactBtn.classList.remove('col-span-2');
           } else {
             waBtn.classList.add('hidden');
             waBtn.removeAttribute('href');
-            contactBtn.classList.add('col-span-2');
+          }
+          if (phoneDigits) {
+            callBtn.href = 'tel:' + phoneDigits;
+            callBtn.classList.remove('hidden');
+          } else {
+            callBtn.classList.add('hidden');
+            callBtn.removeAttribute('href');
+          }
+          // One extra button sits beside "Contact Dealer"; two go on their own row beneath it.
+          const extras = (waUrl ? 1 : 0) + (phoneDigits ? 1 : 0);
+          contactBtn.classList.toggle('col-span-2', extras !== 1);
+        }
+
+        function track(type) {
+          if (window.CarfoxTrack && vehicleId) CarfoxTrack.engagement(type, { vehicleId: vehicleId });
+        }
+
+        function shareListing() {
+          const url = window.location.origin + '/cars/' + vehicleId;
+          const title = document.title;
+          track('share');
+          if (navigator.share) {
+            navigator.share({ title: title, url: url }).catch(function () {});
+            return;
+          }
+          const done = function () {
+            const t = document.getElementById('shareToast');
+            t.classList.remove('hidden');
+            setTimeout(function () { t.classList.add('hidden'); }, 1800);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(done).catch(function () { window.prompt('Copy this link', url); });
+          } else {
+            window.prompt('Copy this link', url);
           }
         }
 
@@ -478,6 +520,7 @@
         }
 
         function handleContactClick() {
+          track('message');
           if (!isSignedInBuyer()) {
             const returnPath = '/cars/' + vehicleId;
             try {
@@ -498,6 +541,9 @@
         });
 
         document.getElementById('contactDealerBtn').addEventListener('click', handleContactClick);
+        document.getElementById('whatsappDealerBtn').addEventListener('click', function () { track('whatsapp'); });
+        document.getElementById('callDealerBtn').addEventListener('click', function () { track('call'); });
+        document.getElementById('detailShareBtn').addEventListener('click', shareListing);
 
         if (window.CarfoxAuth) CarfoxAuth.initBuyerNav();
         if (window.CarfoxBuyerNav) CarfoxBuyerNav.initMessagesUnreadBadge();

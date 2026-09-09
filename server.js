@@ -46,6 +46,9 @@ const dbPath = TURSO_URL
   : path.join(__dirname, 'carfox.db');
 
 const app = express();
+// Render sits behind a proxy: trust X-Forwarded-For so req.ip is the real client (used by the
+// engagement abuse guard). Without this every visitor would share the proxy's IP.
+app.set('trust proxy', true);
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '100kb' }));
 
@@ -329,6 +332,56 @@ db.exec(`
     created_at TEXT NOT NULL
   )
 `);
+
+// Buyer engagement clicks (WhatsApp / call / message / share / website), separate from views.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS engagement_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER,
+    dealership_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('whatsapp', 'call', 'message', 'share', 'website')),
+    created_at TEXT NOT NULL
+  )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_engagement_dealership_created ON engagement_events(dealership_id, created_at)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_engagement_vehicle ON engagement_events(vehicle_id)');
+
+const ENGAGEMENT_TYPES = { whatsapp: true, call: true, message: true, share: true, website: true };
+const ENGAGEMENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Abuse guard: at most 10 events per minute per IP; extra ones are silently ignored.
+const engagementHits = new Map();
+function engagementAllowed(ip) {
+  const now = Date.now();
+  const recent = (engagementHits.get(ip) || []).filter(function (t) { return now - t < 60 * 1000; });
+  if (recent.length >= 10) {
+    engagementHits.set(ip, recent);
+    return false;
+  }
+  recent.push(now);
+  engagementHits.set(ip, recent);
+  return true;
+}
+setInterval(function () {
+  const now = Date.now();
+  engagementHits.forEach(function (arr, ip) {
+    if (!arr.length || now - arr[arr.length - 1] > 60 * 1000) engagementHits.delete(ip);
+  });
+}, 5 * 60 * 1000).unref();
+
+function engagementSummary(dealershipId) {
+  const since = new Date(Date.now() - ENGAGEMENT_WINDOW_MS).toISOString();
+  const rows = db
+    .prepare('SELECT event_type, COUNT(*) AS c FROM engagement_events WHERE dealership_id = ? AND created_at >= ? GROUP BY event_type')
+    .all(dealershipId, since);
+  const breakdown = { whatsapp: 0, call: 0, message: 0, share: 0, website: 0 };
+  let total = 0;
+  rows.forEach(function (r) {
+    if (breakdown[r.event_type] != null) breakdown[r.event_type] = r.c;
+    total += r.c;
+  });
+  return { total: total, breakdown: breakdown };
+}
 
 function touchVehicleUpdatedAt(vehicleId) {
   db.prepare('UPDATE vehicles SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), vehicleId);
@@ -1355,13 +1408,14 @@ app.get('/api/admin/dealers', requireAdmin, function (req, res) {
          u.id AS user_id, u.email AS owner_email, u.full_name AS owner_name,
          (SELECT COUNT(*) FROM vehicles v WHERE v.dealership_id = d.id AND v.status IN ('active', 'paused', 'sold')) AS listings_used,
          (SELECT COUNT(*) FROM vehicles v WHERE v.dealership_id = d.id AND v.status = 'active') AS active_listings,
-         (SELECT COALESCE(SUM(v.views), 0) FROM vehicles v WHERE v.dealership_id = d.id) AS total_views
+         (SELECT COALESCE(SUM(v.views), 0) FROM vehicles v WHERE v.dealership_id = d.id) AS total_views,
+         (SELECT COUNT(*) FROM engagement_events e WHERE e.dealership_id = d.id AND e.created_at >= ?) AS engagements_30d
        FROM dealerships d
        JOIN users u ON u.id = d.user_id
        WHERE d.status = 'approved'
        ORDER BY d.business_name COLLATE NOCASE ASC`
     )
-    .all();
+    .all(new Date(Date.now() - ENGAGEMENT_WINDOW_MS).toISOString());
   return res.json({
     dealers: rows.map(function (r) {
       return {
@@ -1378,6 +1432,7 @@ app.get('/api/admin/dealers', requireAdmin, function (req, res) {
         listings_used: r.listings_used,
         active_listings: r.active_listings,
         total_views: r.total_views,
+        engagements_30d: r.engagements_30d,
         suspended: !!r.suspended,
         suspension_reason: r.suspension_reason || null,
         suspended_at: r.suspended_at || null
@@ -1688,6 +1743,33 @@ app.get('/admin', function (req, res) {
 
 const { MAKES, getModelsForMake } = require('./lib/car-data');
 const { applyDraftPatchFromBody, validateForPublish, currentYear } = require('./lib/vehicle-fields');
+
+// Record a buyer engagement click. Public, fire-and-forget from the client; always 204.
+app.post('/api/engagement', function (req, res) {
+  const body = req.body || {};
+  const type = String(body.event_type || '').trim().toLowerCase();
+  if (!ENGAGEMENT_TYPES[type]) return res.status(400).json({ error: 'Invalid event_type' });
+
+  let vehicleId = body.vehicle_id != null && body.vehicle_id !== '' ? Number(body.vehicle_id) : null;
+  let dealershipId = body.dealership_id != null && body.dealership_id !== '' ? Number(body.dealership_id) : null;
+  if (vehicleId != null) {
+    if (!Number.isInteger(vehicleId)) return res.status(400).json({ error: 'Invalid vehicle_id' });
+    const v = db.prepare('SELECT id, dealership_id FROM vehicles WHERE id = ?').get(vehicleId);
+    if (!v) return res.status(404).json({ error: 'Vehicle not found' });
+    dealershipId = v.dealership_id;
+  } else if (dealershipId != null) {
+    if (!Number.isInteger(dealershipId)) return res.status(400).json({ error: 'Invalid dealership_id' });
+    const d = db.prepare('SELECT id FROM dealerships WHERE id = ?').get(dealershipId);
+    if (!d) return res.status(404).json({ error: 'Dealership not found' });
+  } else {
+    return res.status(400).json({ error: 'vehicle_id or dealership_id is required' });
+  }
+
+  if (!engagementAllowed(req.ip || 'unknown')) return res.status(204).end();
+  db.prepare('INSERT INTO engagement_events (vehicle_id, dealership_id, event_type, created_at) VALUES (?, ?, ?, ?)')
+    .run(vehicleId, dealershipId, type, new Date().toISOString());
+  return res.status(204).end();
+});
 
 // Deprecated: NHTSA VIN decode removed (MENA market uses make/model/year)
 app.get('/api/vin/:vin', function (req, res) {
@@ -2706,6 +2788,7 @@ app.get('/api/dealer/stats', requireDealer, function (req, res) {
     .get(dealershipId).c;
 
   const plan = getDealerPlan(dealershipId);
+  const engagement = engagementSummary(dealershipId);
   return res.json({
     active_listings: activeListings,
     draft_listings: draftListings,
@@ -2715,7 +2798,9 @@ app.get('/api/dealer/stats', requireDealer, function (req, res) {
     sold_this_month: soldThisMonth,
     plan: plan.plan,
     listing_limit: plan.listing_limit,
-    listings_used: countPlanListings(dealershipId, 0)
+    listings_used: countPlanListings(dealershipId, 0),
+    engagements_30d: engagement.total,
+    engagement_breakdown: engagement.breakdown
   });
 });
 
