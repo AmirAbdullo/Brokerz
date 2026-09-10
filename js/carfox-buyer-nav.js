@@ -190,7 +190,7 @@
     if (/\/buyer\/chat\.html$/.test(location.pathname)) return; // chat has its own composer bar
     var path = location.pathname.replace(/\/index\.html$/, '/');
     var isHome = path === '/';
-    var isSearch = /\/(cars|search)\.html$/.test(path) || /^\/cars\//.test(path);
+    var isSearch = /\/(cars|search|quick-search)\.html$/.test(path) || /^\/cars\//.test(path);
     var isFav = /\/buyer\/saved-cars\.html$/.test(path);
     var isMore = !isHome && !isSearch && !isFav;
     function cls(active) {
@@ -205,13 +205,13 @@
     nav.innerHTML =
       '<div class="mx-auto max-w-7xl grid grid-cols-4 h-full">' +
       '<a href="/" class="' + cls(isHome) + '">' + NAV_ICONS.home + label('Home') + '</a>' +
-      '<button type="button" data-quick-search class="' + cls(isSearch) + '">' + NAV_ICONS.search + label('Search') + '</button>' +
+      '<a href="/quick-search.html" data-quick-search class="' + cls(isSearch) + '">' + NAV_ICONS.search + label('Search') + '</a>' +
       '<a href="/buyer/saved-cars.html" class="' + cls(isFav) + '">' + NAV_ICONS.heart + label('Favorites') + '</a>' +
       '<a href="/more.html" class="' + cls(isMore) + '"><span class="relative inline-flex">' + NAV_ICONS.more +
       '<span data-messages-unread-dot class="hidden absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500" aria-hidden="true"></span></span>' + label('More') + '</a>' +
       '</div>';
     document.body.appendChild(nav);
-    // The Search tab opens the quick-search sheet; load it if the page did not include it.
+    // The Search tab opens the quick-search page; the helper script carries current filters over.
     if (!global.CarfoxQuickSearch && !document.querySelector('script[src="/js/carfox-quick-search.js"]')) {
       var s = document.createElement('script');
       s.src = '/js/carfox-quick-search.js';

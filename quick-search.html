@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarFox — Search</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] } } } };
+    </script>
+    <style>
+      .row { display:flex; align-items:center; gap:14px; width:100%; padding:16px 18px; background:#fff; text-align:left; border-top:1px solid #f1f5f9; }
+      .row:first-child { border-top:0; }
+      .row:active { background:#f8fafc; }
+      .row .ic { width:40px; height:40px; border-radius:12px; background:#eff6ff; color:#1d4ed8; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+      .row .chev { color:#94a3b8; flex-shrink:0; }
+      .item { display:flex; align-items:center; gap:14px; width:100%; padding:14px 18px; background:#fff; text-align:left; border-top:1px solid #f1f5f9; font-size:15px; }
+      .item:first-child { border-top:0; }
+      .item:active { background:#f8fafc; }
+      .item[aria-checked="true"] { background:#eff6ff; }
+      .item .check { margin-left:auto; color:#1d4ed8; flex-shrink:0; visibility:hidden; }
+      .item[aria-checked="true"] .check { visibility:visible; }
+      .item .count { margin-left:auto; font-size:12px; color:#94a3b8; }
+      .item[aria-checked="true"] .count { margin-right:8px; }
+      .num { width:100%; border:1px solid #cbd5e1; border-radius:12px; padding:12px 14px; font-size:16px; background:#fff; }
+      .num:focus { outline:2px solid #93c5fd; border-color:#3b82f6; }
+      .pick { display:block; width:100%; text-align:left; padding:12px 16px; border-top:1px solid #f1f5f9; background:#fff; font-size:15px; }
+      .pick:first-child { border-top:0; }
+      .pick[aria-pressed="true"] { background:#eff6ff; color:#1d4ed8; font-weight:600; }
+    </style>
+  </head>
+  <body class="bg-gray-50 text-gray-900 font-sans">
+    <header class="sticky top-0 z-40 bg-white border-b border-gray-200">
+      <div class="mx-auto max-w-lg px-3 h-14 flex items-center justify-between">
+        <button type="button" id="backBtn" class="p-2 -ml-1 text-gray-700 hover:text-gray-900 flex items-center gap-1" aria-label="Back">
+          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <h1 id="title" class="text-base font-bold">Search</h1>
+        <button type="button" id="clearBtn" class="text-sm font-semibold text-blue-700 px-1">Clear all</button>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-lg pb-28 md:pb-10">
+      <!-- Main step -->
+      <section id="stepMain" class="hidden">
+        <div class="md:mt-6 md:rounded-2xl md:border md:border-gray-200 md:overflow-hidden bg-white md:shadow-sm">
+          <button type="button" class="row" data-go="region">
+            <span class="ic"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21s-6-5.3-6-11a6 6 0 1 1 12 0c0 5.7-6 11-6 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span>
+            <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-gray-900">Region</span><span id="subRegion" class="block text-sm text-gray-500 truncate">All regions</span></span>
+            <svg class="chev h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <button type="button" class="row" data-go="make">
+            <span class="ic"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13M5 13h14M5 13v5a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-5"/><circle cx="8" cy="15.5" r="1"/><circle cx="16" cy="15.5" r="1"/></svg></span>
+            <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-gray-900">Make &amp; Model</span><span id="subMake" class="block text-sm text-gray-500 truncate">Any make or model</span></span>
+            <svg class="chev h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <button type="button" class="row" data-go="price">
+            <span class="ic"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20 12l-8 8-9-9V4h7l10 10z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg></span>
+            <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-gray-900">Price</span><span id="subPrice" class="block text-sm text-gray-500 truncate">No min – no max</span></span>
+            <svg class="chev h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <button type="button" class="row" data-go="mileage">
+            <span class="ic"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3a9 9 0 0 0-9 9c0 2.5 1 4.7 2.6 6.3M12 3a9 9 0 0 1 9 9c0 2.5-1 4.7-2.6 6.3M12 12l4-3"/><circle cx="12" cy="12" r="1.5"/></svg></span>
+            <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-gray-900">Mileage</span><span id="subMileage" class="block text-sm text-gray-500 truncate">No min – no max</span></span>
+            <svg class="chev h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+        <div class="px-4 mt-6">
+          <button type="button" id="showBtn" class="w-full rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-base font-bold py-4 shadow-sm">Show Results</button>
+          <a id="advancedLink" href="/search.html" class="block text-center text-sm font-semibold text-blue-700 mt-4">Advanced Filters</a>
+        </div>
+      </section>
+
+      <!-- Region -->
+      <section id="stepRegion" class="hidden">
+        <div id="regionList" class="md:mt-6 md:rounded-2xl md:border md:border-gray-200 md:overflow-hidden bg-white" role="listbox"></div>
+      </section>
+
+      <!-- Make -->
+      <section id="stepMake" class="hidden">
+        <div id="makeList" class="md:mt-6 md:rounded-2xl md:border md:border-gray-200 md:overflow-hidden bg-white" role="listbox"><div class="px-4 py-6 text-sm text-gray-500">Loading makes…</div></div>
+      </section>
+
+      <!-- Model -->
+      <section id="stepModel" class="hidden">
+        <div id="modelList" class="md:mt-6 md:rounded-2xl md:border md:border-gray-200 md:overflow-hidden bg-white" role="listbox"><div class="px-4 py-6 text-sm text-gray-500">Loading models…</div></div>
+      </section>
+
+      <!-- Price -->
+      <section id="stepPrice" class="hidden">
+        <div class="md:mt-6 md:rounded-2xl md:border md:border-gray-200 bg-white p-4">
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block"><span class="block text-xs font-semibold text-gray-600 mb-1">Min (EGP)</span><input id="minPrice" class="num" inputmode="numeric" placeholder="No min" /></label>
+            <label class="block"><span class="block text-xs font-semibold text-gray-600 mb-1">Max (EGP)</span><input id="maxPrice" class="num" inputmode="numeric" placeholder="No max" /></label>
+          </div>
+        </div>
+        <div class="mt-4 px-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Quick picks</div>
+        <div id="pricePicks" class="mt-2 md:rounded-2xl md:border md:border-gray-200 md:overflow-hidden bg-white"></div>
+        <div class="px-4 mt-6"><button type="button" id="applyPrice" class="w-full rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-base font-bold py-4">Apply</button></div>
+      </section>
+
+      <!-- Mileage -->
+      <section id="stepMileage" class="hidden">
+        <div class="md:mt-6 md:rounded-2xl md:border md:border-gray-200 bg-white p-4">
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block"><span class="block text-xs font-semibold text-gray-600 mb-1">Min (km)</span><input id="minMileage" class="num" inputmode="numeric" placeholder="No min" /></label>
+            <label class="block"><span class="block text-xs font-semibold text-gray-600 mb-1">Max (km)</span><input id="maxMileage" class="num" inputmode="numeric" placeholder="No max" /></label>
+          </div>
+        </div>
+        <div class="mt-4 px-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Quick picks</div>
+        <div id="mileagePicks" class="mt-2 md:rounded-2xl md:border md:border-gray-200 md:overflow-hidden bg-white"></div>
+        <div class="px-4 mt-6"><button type="button" id="applyMileage" class="w-full rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-base font-bold py-4">Apply</button></div>
+      </section>
+    </main>
+
+    <script src="/js/carfox-auth.js"></script>
+    <script src="/js/carfox-buyer-nav.js"></script>
+    <script src="/js/carfox-quick-search.js"></script>
+    <script>
+      (function () {
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const fmt = (n) => Number(n).toLocaleString('en-US');
+        const parseNum = (raw) => { const v = String(raw || '').replace(/[^0-9]/g, ''); if (!v) return null; const n = parseInt(v, 10); return isNaN(n) ? null : n; };
+        const STORAGE_KEY = 'cfqs_state';
+        const STEPS = ['main', 'region', 'make', 'model', 'price', 'mileage'];
+        const TITLES = { main: 'Search', region: 'Region', make: 'Make', model: 'Model', price: 'Price', mileage: 'Mileage' };
+        const FILTER_KEYS = ['city', 'make', 'model', 'min_price', 'max_price', 'min_mileage', 'max_mileage'];
+        const PRICE_PICKS = [['Under 300,000', null, 300000], ['300,000 – 600,000', 300000, 600000], ['600,000 – 1,000,000', 600000, 1000000], ['1,000,000 – 2,000,000', 1000000, 2000000], ['2,000,000 and up', 2000000, null]];
+        const MILEAGE_PICKS = [['Under 20,000 km', null, 20000], ['20,000 – 50,000 km', 20000, 50000], ['50,000 – 100,000 km', 50000, 100000], ['100,000 – 150,000 km', 100000, 150000], ['150,000 km and up', 150000, null]];
+
+        let state = { city: '', make: '', model: '', min_price: null, max_price: null, min_mileage: null, max_mileage: null };
+        let makesCache = null;
+        const modelsCache = {};
+
+        function brandLogoUrl(brand) {
+          if (/^mercedes/i.test(brand)) return 'https://www.carlogos.org/car-logos/mercedes-benz-logo.png';
+          return 'https://www.carlogos.org/car-logos/' + String(brand).toLowerCase().replace(/\s+/g, '-') + '-logo.png';
+        }
+
+        // ---------- state persistence ----------
+        function save() { try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {} }
+        function loadState() {
+          const p = new URLSearchParams(location.search);
+          const hasFilterParams = FILTER_KEYS.some((k) => p.has(k));
+          if (hasFilterParams) {
+            const makes = (p.get('make') || '').split(',').map((s) => s.trim()).filter(Boolean);
+            state = {
+              city: (p.get('city') || '').split(',').map((s) => s.trim()).filter(Boolean)[0] || '',
+              make: makes.length === 1 ? makes[0] : '',
+              model: makes.length === 1 ? (p.get('model') || '').trim() : '',
+              min_price: parseNum(p.get('min_price')), max_price: parseNum(p.get('max_price')),
+              min_mileage: parseNum(p.get('min_mileage')), max_mileage: parseNum(p.get('max_mileage'))
+            };
+            save();
+            // drop the filter params from the URL; the step param is all we keep
+            const step = p.get('step');
+            history.replaceState({ qs: true, step: step || 'main' }, '', location.pathname + (step ? '?step=' + step : ''));
+            return;
+          }
+          try {
+            const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null');
+            if (saved && typeof saved === 'object') state = Object.assign(state, saved);
+          } catch (_) {}
+        }
+        function params() {
+          const p = new URLSearchParams();
+          if (state.city) p.set('city', state.city);
+          if (state.make) p.set('make', state.make);
+          if (state.make && state.model) p.set('model', state.model);
+          ['min_price', 'max_price', 'min_mileage', 'max_mileage'].forEach((k) => { if (state[k] != null) p.set(k, String(state[k])); });
+          return p;
+        }
+
+        // ---------- navigation (one URL per step; browser back returns to the previous step) ----------
+        function currentStep() {
+          const s = new URLSearchParams(location.search).get('step') || 'main';
+          return STEPS.indexOf(s) === -1 ? 'main' : s;
+        }
+        function go(step) {
+          history.pushState({ qs: true, step: step }, '', location.pathname + '?step=' + step);
+          render();
+        }
+        function back() {
+          if (history.state && history.state.qs && currentStep() !== 'main') { history.back(); return; }
+          if (currentStep() !== 'main') { history.replaceState({ qs: true, step: 'main' }, '', location.pathname); render(); return; }
+          // main step: leave the flow
+          if (document.referrer && new URL(document.referrer).origin === location.origin && history.length > 1) history.back();
+          else location.href = '/';
+        }
+        window.addEventListener('popstate', render);
+
+        // ---------- rendering ----------
+        function subtitles() {
+          $('subRegion').textContent = state.city || 'All regions';
+          $('subMake').textContent = state.make ? state.make + ' · ' + (state.model || 'any model') : 'Any make or model';
+          $('subPrice').textContent = (state.min_price != null ? fmt(state.min_price) : 'No min') + ' – ' + (state.max_price != null ? fmt(state.max_price) : 'no max') + (state.min_price != null || state.max_price != null ? ' EGP' : '');
+          $('subMileage').textContent = (state.min_mileage != null ? fmt(state.min_mileage) : 'No min') + ' – ' + (state.max_mileage != null ? fmt(state.max_mileage) : 'no max') + (state.min_mileage != null || state.max_mileage != null ? ' km' : '');
+          const qs = params().toString();
+          $('advancedLink').href = '/search.html' + (qs ? '?' + qs : '');
+        }
+        let countTimer = null;
+        function updateCount() {
+          clearTimeout(countTimer);
+          countTimer = setTimeout(() => {
+            const qs = params().toString();
+            fetch('/api/cars/count' + (qs ? '?' + qs : '')).then((r) => r.ok ? r.json() : null).then((d) => {
+              if (d && typeof d.total === 'number') $('showBtn').textContent = 'Show ' + fmt(d.total) + ' Result' + (d.total === 1 ? '' : 's');
+            }).catch(() => {});
+          }, 150);
+        }
+
+        function listItem(label, checked, opts) {
+          opts = opts || {};
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'item';
+          b.setAttribute('role', 'option');
+          b.setAttribute('aria-checked', checked ? 'true' : 'false');
+          let html = '';
+          if (opts.logo) {
+            html += '<span class="w-9 h-9 flex items-center justify-center shrink-0"><img src="' + esc(opts.logo) + '" alt="" width="36" height="36" loading="lazy" class="w-9 h-9 object-contain" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'w-9 h-9 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-sm font-bold\',textContent:\'' + esc(label.charAt(0)) + '\'}))" /></span>';
+          }
+          html += '<span class="' + (opts.bold ? 'font-semibold ' : '') + 'text-gray-900">' + esc(label) + '</span>';
+          if (opts.count != null) html += '<span class="count">' + fmt(opts.count) + '</span>';
+          html += '<svg class="check h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
+          b.innerHTML = html;
+          return b;
+        }
+
+        function renderRegion() {
+          const host = $('regionList');
+          host.innerHTML = '';
+          const all = listItem('All Egypt', !state.city, { bold: true });
+          all.addEventListener('click', () => { state.city = ''; save(); back(); });
+          host.appendChild(all);
+          CarfoxQuickSearch.GOVERNORATES.forEach((g) => {
+            const it = listItem(g, state.city === g);
+            it.addEventListener('click', () => { state.city = g; save(); back(); });
+            host.appendChild(it);
+          });
+        }
+
+        function loadMakes() {
+          if (makesCache) return Promise.resolve(makesCache);
+          return Promise.all([
+            fetch('/api/car-data/makes').then((r) => r.json()).then((d) => d.makes || []),
+            fetch('/api/cars/filter-options').then((r) => r.json()).then((d) => d.makes || []).catch(() => [])
+          ]).then(([all, withCounts]) => {
+            const counts = {};
+            withCounts.forEach((m) => { counts[m.name] = m.count; });
+            const names = all.slice();
+            withCounts.forEach((m) => { if (names.indexOf(m.name) === -1) names.push(m.name); });
+            makesCache = names.map((n) => ({ name: n, count: counts[n] || 0 }))
+              .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+            return makesCache;
+          });
+        }
+        function renderMake() {
+          const host = $('makeList');
+          loadMakes().then((makes) => {
+            host.innerHTML = '';
+            const all = listItem('All makes', !state.make, { bold: true });
+            all.addEventListener('click', () => { state.make = ''; state.model = ''; save(); back(); });
+            host.appendChild(all);
+            makes.forEach((m) => {
+              const it = listItem(m.name, state.make === m.name, { logo: brandLogoUrl(m.name), count: m.count });
+              it.addEventListener('click', () => {
+                if (state.make !== m.name) state.model = '';
+                state.make = m.name;
+                save();
+                // replace the make step with the model step so back from models returns to the main page
+                history.replaceState({ qs: true, step: 'model' }, '', location.pathname + '?step=model');
+                render();
+              });
+              host.appendChild(it);
+            });
+          }).catch(() => { host.innerHTML = '<div class="px-4 py-6 text-sm text-red-600">Could not load makes.</div>'; });
+        }
+
+        function loadModels(make) {
+          if (modelsCache[make]) return Promise.resolve(modelsCache[make]);
+          return Promise.all([
+            fetch('/api/car-data/models?make=' + encodeURIComponent(make)).then((r) => r.json()).then((d) => d.models || []),
+            fetch('/api/cars/filter-options?make=' + encodeURIComponent(make)).then((r) => r.json()).then((d) => d.models || []).catch(() => [])
+          ]).then(([all, withCounts]) => {
+            const counts = {};
+            withCounts.forEach((m) => { counts[m.name] = m.count; });
+            const names = all.slice();
+            withCounts.forEach((m) => { if (names.indexOf(m.name) === -1) names.push(m.name); });
+            modelsCache[make] = names.map((n) => ({ name: n, count: counts[n] || 0 }))
+              .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+            return modelsCache[make];
+          });
+        }
+        function renderModel() {
+          const host = $('modelList');
+          if (!state.make) { history.replaceState({ qs: true, step: 'make' }, '', location.pathname + '?step=make'); render(); return; }
+          $('title').textContent = state.make + ' models';
+          host.innerHTML = '<div class="px-4 py-6 text-sm text-gray-500">Loading models…</div>';
+          loadModels(state.make).then((models) => {
+            host.innerHTML = '';
+            const all = listItem('All ' + state.make + ' models', !state.model, { bold: true });
+            all.addEventListener('click', () => { state.model = ''; save(); back(); });
+            host.appendChild(all);
+            models.forEach((m) => {
+              const it = listItem(m.name, state.model === m.name, { count: m.count });
+              it.addEventListener('click', () => { state.model = m.name; save(); back(); });
+              host.appendChild(it);
+            });
+          }).catch(() => { host.innerHTML = '<div class="px-4 py-6 text-sm text-red-600">Could not load models.</div>'; });
+        }
+
+        function renderPicks(hostId, picks, minKey, maxKey, minInput, maxInput) {
+          const host = $(hostId);
+          host.innerHTML = '';
+          picks.forEach(([label, min, max]) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'pick';
+            b.textContent = label;
+            b.setAttribute('aria-pressed', state[minKey] === min && state[maxKey] === max ? 'true' : 'false');
+            b.addEventListener('click', () => {
+              state[minKey] = min; state[maxKey] = max;
+              $(minInput).value = min != null ? fmt(min) : '';
+              $(maxInput).value = max != null ? fmt(max) : '';
+              renderPicks(hostId, picks, minKey, maxKey, minInput, maxInput);
+            });
+            host.appendChild(b);
+          });
+        }
+        function bindRange(minInput, maxInput, minKey, maxKey, hostId, picks) {
+          [[minInput, minKey], [maxInput, maxKey]].forEach(([id, key]) => {
+            const el = $(id);
+            el.addEventListener('focus', () => { el.value = el.value.replace(/,/g, ''); });
+            el.addEventListener('input', () => { const d = el.value.replace(/[^0-9]/g, ''); if (el.value !== d) el.value = d; state[key] = parseNum(d); renderPicks(hostId, picks, minKey, maxKey, minInput, maxInput); });
+            el.addEventListener('blur', () => { if (state[key] != null) el.value = fmt(state[key]); });
+          });
+        }
+        function renderPrice() {
+          $('minPrice').value = state.min_price != null ? fmt(state.min_price) : '';
+          $('maxPrice').value = state.max_price != null ? fmt(state.max_price) : '';
+          renderPicks('pricePicks', PRICE_PICKS, 'min_price', 'max_price', 'minPrice', 'maxPrice');
+        }
+        function renderMileage() {
+          $('minMileage').value = state.min_mileage != null ? fmt(state.min_mileage) : '';
+          $('maxMileage').value = state.max_mileage != null ? fmt(state.max_mileage) : '';
+          renderPicks('mileagePicks', MILEAGE_PICKS, 'min_mileage', 'max_mileage', 'minMileage', 'maxMileage');
+        }
+
+        function render() {
+          const step = currentStep();
+          STEPS.forEach((s) => { $('step' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== step); });
+          $('title').textContent = TITLES[step];
+          $('clearBtn').classList.toggle('hidden', step !== 'main');
+          document.body.setAttribute('data-step', step);
+          if (step === 'main') { subtitles(); updateCount(); }
+          else if (step === 'region') renderRegion();
+          else if (step === 'make') renderMake();
+          else if (step === 'model') renderModel();
+          else if (step === 'price') renderPrice();
+          else if (step === 'mileage') renderMileage();
+          window.scrollTo(0, 0);
+        }
+
+        // ---------- wiring ----------
+        document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.getAttribute('data-go'))));
+        $('backBtn').addEventListener('click', back);
+        $('clearBtn').addEventListener('click', () => { state = { city: '', make: '', model: '', min_price: null, max_price: null, min_mileage: null, max_mileage: null }; save(); render(); });
+        $('showBtn').addEventListener('click', () => { const qs = params().toString(); location.href = '/cars.html' + (qs ? '?' + qs : ''); });
+        $('applyPrice').addEventListener('click', () => { save(); back(); });
+        $('applyMileage').addEventListener('click', () => { save(); back(); });
+        bindRange('minPrice', 'maxPrice', 'min_price', 'max_price', 'pricePicks', PRICE_PICKS);
+        bindRange('minMileage', 'maxMileage', 'min_mileage', 'max_mileage', 'mileagePicks', MILEAGE_PICKS);
+
+        loadState();
+        if (!history.state || !history.state.qs) history.replaceState({ qs: true, step: currentStep() }, '', location.href);
+        render();
+      })();
+    </script>
+  </body>
+</html>
