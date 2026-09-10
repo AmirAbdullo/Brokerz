@@ -2202,6 +2202,52 @@ app.get('/api/cars/filter-options', function (req, res) {
   return res.json(payload);
 });
 
+// Live search suggestions: brands, models and top listings matching a partial word.
+// Only active listings from approved, non-suspended dealers are considered.
+app.get('/api/search-suggest', function (req, res) {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const empty = { q: q, makes: [], models: [], cars: [] };
+  if (q.length < 2 || q.length > 60) return res.json(empty);
+  const like = '%' + q.replace(/[%_\\]/g, function (ch) { return '\\' + ch; }) + '%';
+  const where = PUBLIC_CARS_BASE_WHERE;
+
+  const makes = db
+    .prepare(
+      'SELECT v.make AS name, COUNT(*) AS count ' + PUBLIC_CARS_FROM_SQL +
+      " WHERE " + where + " AND v.make IS NOT NULL AND LOWER(v.make) LIKE ? ESCAPE '\\'" +
+      ' GROUP BY v.make ORDER BY count DESC, name ASC LIMIT 3'
+    )
+    .all(like);
+
+  const models = db
+    .prepare(
+      'SELECT v.make AS make, v.model AS model, COUNT(*) AS count ' + PUBLIC_CARS_FROM_SQL +
+      " WHERE " + where + " AND v.model IS NOT NULL AND TRIM(v.model) != ''" +
+      " AND (LOWER(v.model) LIKE ? ESCAPE '\\' OR LOWER(v.make || ' ' || v.model) LIKE ? ESCAPE '\\')" +
+      ' GROUP BY v.make, v.model ORDER BY count DESC, make ASC, model ASC LIMIT 3'
+    )
+    .all(like, like);
+
+  const cars = db
+    .prepare(
+      'SELECT v.id, v.year, v.make, v.model, v.trim, v.price, p.url AS primary_photo_url,' +
+      ' COALESCE(d.governorate, d.city) AS governorate ' + PUBLIC_CARS_FROM_SQL +
+      ' LEFT JOIN vehicle_photos p ON p.vehicle_id = v.id AND p.is_primary = 1' +
+      " WHERE " + where +
+      " AND LOWER(v.year || ' ' || v.make || ' ' || v.model || ' ' || COALESCE(v.trim, '')) LIKE ? ESCAPE '\\'" +
+      ' ORDER BY COALESCE(v.published_at, v.created_at) DESC LIMIT 3'
+    )
+    .all(like);
+
+  // Cap the dropdown at 8 items: keep cars, then trim models, then makes.
+  let overflow = makes.length + models.length + cars.length - 8;
+  while (overflow > 0 && models.length > 1) { models.pop(); overflow--; }
+  while (overflow > 0 && makes.length > 1) { makes.pop(); overflow--; }
+
+  res.set('Cache-Control', 'no-store');
+  return res.json({ q: q, makes: makes, models: models, cars: cars });
+});
+
 app.get('/api/cars/count', function (req, res) {
   const total = countPublicCars(req.query);
   return res.json({ total: total });
